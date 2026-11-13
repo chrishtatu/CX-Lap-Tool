@@ -1,0 +1,23 @@
+// Failed network resources and saved-report reopening must leave a usable offline app.
+const append=document.head.appendChild.bind(document.head);
+document.head.appendChild=function(el){if(el.dataset&&'cxBasemap' in el.dataset){setTimeout(()=>el.onerror(),0);return el;}return append(el);};
+window.maplibregl={Map:class{constructor(){throw new Error('should not start without its stylesheet');}}};
+const rejected=[];window.addEventListener('unhandledrejection',e=>{rejected.push(e.reason);e.preventDefault();});
+A.loadRaw(synthRace(),'Offline test');const times=JSON.stringify(lapTimes(A.M));
+await sleep(80);
+check('failed library download shows a useful fallback',A.background.status==='unavailable'&&/Background unavailable/.test(txt('mapstatus'))&&!$('mapframe').classList.contains('with-basemap')&&!$('map-retry').hidden);
+A.selectSection(2);$('mz-in').click();await sleep(80);A.replay.seek(60);
+check('offline section selection, zoom and replay still work',A.state.sel===2&&A.state.mz.z>1&&$('replaylayer').children.length>0);
+check('network failure leaves every lap unchanged',JSON.stringify(lapTimes(A.M))===times);
+$('map-style').value='aerial';$('map-style').dispatchEvent(new Event('change'));await sleep(80);
+const got=captureDownloads();$('savereport').click();await sleep(40);const html=(await got())[0];
+check('saved report contains the complete offline engine',/window.CXApp=/.test(html)&&/retryBackground/.test(html));
+const offlineScript='<script>Object.defineProperty(navigator,"onLine",{get:()=>false});</'+'script>';
+const frame=document.createElement('iframe'),loaded=new Promise(resolve=>frame.onload=resolve);
+frame.srcdoc=html.replace('<script id="app">',offlineScript+'<script id="app">');document.body.appendChild(frame);await Promise.race([loaded,sleep(5000)]);
+const B=frame.contentWindow.CXApp,doc=frame.contentDocument;
+check('saved report opens automatically with the offline course',B&&B.M&&B.M.nl===A.M.nl&&B.background.status==='offline'&&!doc.getElementById('report').hidden);
+check('saved Aerial reports still open with Simple as the default',doc.getElementById('map-style').value==='simple');
+check('offline report does not request the map library',!doc.querySelector('link[data-cx-basemap]'));
+check('resource failure causes no unhandled rejection',rejected.length===0,rejected.map(String).join(' | '));
+document.head.appendChild=append;
