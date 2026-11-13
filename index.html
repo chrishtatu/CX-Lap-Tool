@@ -955,7 +955,8 @@ function computeSections(Mr,set){
       const t=t1-t0;
       return {t,pw:Math.round(mean(ps)),pmax:Math.max(...ps),coast:Math.round(ps.filter(v=>v===0).length/ps.length*100),vmin:Math.min(...vs),vmax:Math.max(...vs),v:(sf(s1)-sf(s0))/5280/(t/3600)};
     });
-    out.push({id:i+1,name:(set.names&&set.names[i])||`Section ${i+1}`,s0,s1,ft0:sf(s0),ft1:sf(s1),
+    const base=(set.names&&set.names[i])||`Section ${i+1}`,mark=markAt(s0,s1);
+    out.push({id:i+1,name:markedName(base,mark,i),baseName:base,mark,s0,s1,ft0:sf(s0),ft1:sf(s1),
       climb:interp1(s1,Mr.G,Mr.altG)-interp1(s0,Mr.G,Mr.altG),laps:per});
   }
   return out;
@@ -972,7 +973,7 @@ const LSKEY='cxLapAnalyzer.sections.v1';
 function lsGet(){try{return JSON.parse(localStorage.getItem(LSKEY)||'[]');}catch(e){return [];}}
 function lsSet(v){try{localStorage.setItem(LSKEY,JSON.stringify(v));return true;}catch(e){return false;}}
 function courseMatch(rec){const d=Math.hypot((rec.lat-M.lapLineLL.lat)*M.ky,(rec.lon-M.lapLineLL.lon)*M.kx);return d<200&&Math.abs(rec.lapFt-M.ftG[M.NG-1])/rec.lapFt<0.15;}
-function userToStore(withCorners){return {...(withCorners?{corners:CN.map(e=>({...e}))}:{}),lat:M.lapLineLL.lat,lon:M.lapLineLL.lon,lapFt:M.ftG[M.NG-1],saved:new Date().toISOString(),
+function userToStore(withCorners){return {...(withCorners?{corners:CN.map(e=>({...e})),marks:ST.map(e=>({...e}))}:{}),lat:M.lapLineLL.lat,lon:M.lapLineLL.lon,lapFt:M.ftG[M.NG-1],saved:new Date().toISOString(),
   cuts:USER.cuts.map(s=>{const g=Math.round(s/M.STEP);const ll=M.toLL(M.gx[Math.min(g,M.NG-1)],M.gy[Math.min(g,M.NG-1)]);return {lat:ll.lat,lon:ll.lon,frac:s/M.Lref};}),names:USER.names.slice()};}
 function storeToUser(rec){
   const cuts=rec.cuts.map(c=>{const x=(c.lon-M.lon0)*M.kx,y=(c.lat-M.lat0)*M.ky;let best=null,bs=1e9;
@@ -997,6 +998,29 @@ function setCornerName(j,name){name=String(name||'').trim();const c=M.corners[j]
   CN=CN.filter(e=>entryCorner(M,e)!==j);if(name)CN.push({lat:ll.lat,lon:ll.lon,frac:c.s/M.Lref,name});
   applyCornerNames();saveCornerNames();}
 function clearCornerNames(){CN=[];applyCornerNames();saveCornerNames();renderAll();}
+/* ---- section marks (barriers / run-up): stored per course like corner names, as a point in the middle of the marked section.
+   A mark applies to whichever section contains that point, in the automatic set or yours, so it survives redrawing sections. ---- */
+const STKEY='cxLapAnalyzer.secMarks.v1',MARK_TYPES={barriers:'Barriers','runup':'Run-up'};
+let ST=[]; // [{lat,lon,frac,type}]
+let MARKS=[]; // [{s,type}] on the reference course
+function stGet(){try{return JSON.parse(localStorage.getItem(STKEY)||'[]');}catch(e){return [];}}
+function saveMarks(){const all=stGet().filter(r=>!courseMatch(r));if(ST.length)all.push({lat:M.lapLineLL.lat,lon:M.lapLineLL.lon,lapFt:M.ftG[M.NG-1],saved:new Date().toISOString(),marks:ST.map(e=>({...e}))});try{localStorage.setItem(STKEY,JSON.stringify(all));}catch(e){}}
+function markS(Mr,e){const ex=(e.lon-Mr.lon0)*Mr.kx,ey=(e.lat-Mr.lat0)*Mr.ky;let best=null,bs=1e9;
+  for(let g=0;g<Mr.NG;g++){const d=Math.hypot(Mr.gx[g]-ex,Mr.gy[g]-ey);if(d<30){const sc=d+Math.abs(Mr.G[g]-e.frac*Mr.Lref)*0.3;if(sc<bs){bs=sc;best=Mr.G[g];}}}return best;}
+function applyMarks(){const R=RIDERS[PRIMARY];MARKS=R&&R.M?ST.map(e=>({s:markS(R.M,e),type:e.type})).filter(m=>m.s!=null&&MARK_TYPES[m.type]):[];}
+const cleanMarks=a=>(Array.isArray(a)?a:[]).filter(e=>e&&MARK_TYPES[e.type]&&isFinite(e.lat)&&isFinite(e.lon)).map(e=>({lat:e.lat,lon:e.lon,frac:e.frac,type:e.type}));
+function loadMarks(pre){const rec=stGet().find(courseMatch);ST=cleanMarks(rec?rec.marks:(Array.isArray(pre)&&pre.length?pre:ST));applyMarks();}
+const markAt=(s0,s1)=>{const m=MARKS.filter(x=>x.s>=s0&&x.s<s1);return m.length?m[m.length-1].type:null;};
+// mark (or unmark: type null) section i of the current set
+function setMark(i,type){const s=S[i];if(!s)return;
+  ST=ST.filter(e=>{const v=markS(M,e);return v==null||v<s.s0||v>=s.s1;});
+  if(MARK_TYPES[type]){const m=(s.s0+s.s1)/2,ll=M.toLL(interp1(m,M.G,M.gx),interp1(m,M.G,M.gy));ST.push({lat:ll.lat,lon:ll.lon,frac:m/M.Lref,type});}
+  applyMarks();saveMarks();renderAll();}
+// a section name the app made up (not typed by you) is replaced by the mark; a name you typed keeps it and gets the mark added
+const AUTO_NAME=/^(From the line: )?(run-up \(off the bike\)|off-bike section|climb|descent|fast straight|technical|hairpin|turn pair|sharp turn|sweeper|straight|section \d+|whole lap|barriers|run-up)/i;
+function markedName(name,type,i){const lab=MARK_TYPES[type];if(!lab)return name;
+  if(!name||AUTO_NAME.test(name))return i===0?'From the line: '+lab.toLowerCase():lab;return `${name} (${lab.toLowerCase()})`;}
+const markSel=(i,type,id)=>`<select ${id?`id="${id}"`:''} data-mk="${i}" aria-label="Mark section S${i+1}"><option value=""${type?'':' selected'}>—</option>${Object.entries(MARK_TYPES).map(([k,v])=>`<option value="${k}"${type===k?' selected':''}>${v}</option>`).join('')}</select>`;
 const cTitle=c=>`C${c.id}`+(c.cname?' · '+esc(c.cname):'');
 const cText=c=>`C${c.id}`+(c.cname?' · '+c.cname:'');
 function saveUser(){const all=lsGet().filter(r=>!courseMatch(r));all.push(userToStore());lsSet(all);}
@@ -1092,7 +1116,7 @@ function run(preloadSecs){
   state.mz={z:1,vx:0,vy:0};state.base='best';state.sel=null;state.corner=null;state.xr=null;state.editing=false;
   state.mapLap=bestLap;state.vis=Array(NL).fill(true);
   AUTO=autoSections(M);
-  const had=loadUser(preloadSecs);loadCornerNames(preloadSecs&&preloadSecs.corners);
+  const had=loadUser(preloadSecs);loadCornerNames(preloadSecs&&preloadSecs.corners);loadMarks(preloadSecs&&preloadSecs.marks);
   if(preloadSecs&&state.secMode!=='user'&&had)state.secMode='user';
   const ok=okRiders();
   if(!isMulti()&&(typeof state.view!=='number'||!RIDERS[state.view]||!RIDERS[state.view].M))state.view=PRIMARY;
@@ -1584,7 +1608,7 @@ function renderMap(){
     h+=`<circle class="mcor" data-j="${j}" cx="${px(X[i])}" cy="${py(Y[i])}" r="${(sel?5.5:3.2)*K}" fill="var(--surface)" stroke="var(--ink)" stroke-width="${(sel?2:1.2)*K}" style="cursor:pointer"/>`;});
   S.forEach((s,i)=>{const j=idxAtFt((s.ft0+s.ft1)/2),j2=Math.min(NX-1,j+2);const dx=X[j2]-X[j],dy=Y[j2]-Y[j],n=Math.hypot(dx,dy)||1;
     const x=px(X[j]-dy/n*15*K),y=py(Y[j]+dx/n*15*K);
-    h+=`<g style="pointer-events:none" transform="translate(${x},${y}) scale(${K})"><circle r="9" fill="var(--surface)" stroke="var(--ring)"/><text y="3.5" text-anchor="middle" style="fill:var(--ink);font-size:10px;font-weight:650">${s.id}</text></g>`;});
+    h+=`<g style="pointer-events:none" transform="translate(${x},${y}) scale(${K})"><circle r="9" fill="var(--surface)" stroke="var(--ring)"/><text y="3.5" text-anchor="middle" style="fill:var(--ink);font-size:10px;font-weight:650">${s.id}</text>${s.mark?`<text x="12" y="3.5" style="fill:var(--ink);font-size:9.5px;font-weight:600;font-style:italic;paint-order:stroke;stroke:var(--surface);stroke-width:3px">${s.mark==='runup'?'run-up':'barriers'}</text>`:''}</g>`;});
   h+=`<g style="pointer-events:none" transform="translate(${px(X[0])},${py(Y[0])}) scale(${K})"><rect x="-3" y="-10" width="6" height="20" fill="var(--ink)" rx="1"/><text x="8" y="-8" style="fill:var(--ink2);font-weight:600">Lap line</text></g>`;
   if(state.editing){h+=`<g id="drawlayer" style="pointer-events:none"></g>`;
     USER.cuts.forEach((c,ci)=>{const x=px(interp1(c,M.G,M.gx)),y=py(interp1(c,M.G,M.gy));
@@ -1699,8 +1723,8 @@ function renderDetail(){
         <button id="ed-undo" ${ED.hist.length?'':'disabled'}>Undo</button>${draw?`<button id="ed-restart">Restart from the lap line</button>${ED.start!=null?'<button id="ed-finish">End this section at the lap line</button><button id="ed-pause">Pause</button>':''}`:''}</div>
       <p class="note" style="margin:0 0 6px">${status}</p>
       ${draw?'<div class="banner" id="drawinfo" style="min-height:22px"></div><p class="hint" style="margin:-4px 0 8px">Scroll wheel or ← → fine-tune the end (hold Shift for bigger steps) · Enter sets it · Backspace undoes · Esc pauses</p>':'<div class="banner" id="drawinfo" style="min-height:22px">Drag a handle to see the two sections it separates.</div>'}
-      <div class="scroll"><table class="ed"><tr><th class="l">#</th><th class="l">Name</th><th>Starts at</th><th>Typical</th><th></th></tr>`;
-    S.forEach((s,i)=>{h+=`<tr${draw&&ED.start!=null&&i===drawingIndex()-1?' style="outline:2px solid var(--ink2);outline-offset:-2px;border-radius:4px"':''}><td class="l"><b>S${s.id}</b></td><td class="l"><input type="text" data-i="${i}" value="${esc(s.name)}"></td><td>${uLen(s.ft0)}</td><td>${fmt1(st[i].med)} s</td><td>${i>0?`<button data-rm="${i}" title="Remove this boundary">✕</button>`:''}</td></tr>`;});
+      <div class="scroll"><table class="ed"><tr><th class="l">#</th><th class="l">Name</th><th class="l">Mark as</th><th>Starts at</th><th>Typical</th><th></th></tr>`;
+    S.forEach((s,i)=>{h+=`<tr${draw&&ED.start!=null&&i===drawingIndex()-1?' style="outline:2px solid var(--ink2);outline-offset:-2px;border-radius:4px"':''}><td class="l"><b>S${s.id}</b></td><td class="l"><input type="text" data-i="${i}" value="${esc(s.baseName)}"></td><td class="l">${markSel(i,s.mark)}</td><td>${uLen(s.ft0)}</td><td>${fmt1(st[i].med)} s</td><td>${i>0?`<button data-rm="${i}" title="Remove this boundary">✕</button>`:''}</td></tr>`;});
     h+=`</table></div><div class="row-flex" style="margin-top:10px">
       <button class="primary" id="ed-done">Done</button><button id="ed-reset">Reset to automatic sections</button><button id="ed-clear">Clear all boundaries</button>
       <button id="ed-export">Export</button><button id="ed-import">Import</button></div>
@@ -1714,6 +1738,7 @@ function renderDetail(){
     if($('ed-pause'))$('ed-pause').onclick=()=>{ED.start=null;ED.end=null;renderAll();};
     el.querySelectorAll('input[type=text]').forEach(inp=>inp.onchange=()=>{USER.names[+inp.dataset.i]=inp.value;saveUser();renderAll();});
     el.querySelectorAll('button[data-rm]').forEach(b=>b.onclick=()=>removeCut(+b.dataset.rm));
+    el.querySelectorAll('select[data-mk]').forEach(sel=>sel.onchange=()=>setMark(+sel.dataset.mk,sel.value||null));
     el.querySelectorAll('input[type=text]').forEach(inp=>{inp.onkeydown=e=>e.stopPropagation();});
     $('ed-done').onclick=()=>{state.editing=false;renderAll();};
     $('ed-reset').onclick=()=>{pushHist();USER={cuts:AUTO.cuts.slice(),names:AUTO.names.slice()};saveUser();renderAll();};
@@ -1730,7 +1755,8 @@ function renderDetail(){
     el.innerHTML=h;return;
   }
   const i=state.sel,s=S[i],st=secStats(i);const vals=s.laps.filter(Boolean).map(l=>l.t),mn=Math.min(...vals),mx=Math.max(...vals);
-  let h=`<h2>${esc(secName(i))}</h2><p class="note" style="margin-top:-6px">${uLen(s.ft1-s.ft0)} · ${s.climb>0?'+':''}${uElev(s.climb)} elevation · median ${fmt1(st.med)} s · spread ±${st.sd.toFixed(1)} s · best lap ${st.bestK+1}</p><div class="bars">`;
+  let h=`<h2>${esc(secName(i))}</h2><p class="note" style="margin-top:-6px">${uLen(s.ft1-s.ft0)} · ${s.climb>0?'+':''}${uElev(s.climb)} elevation · median ${fmt1(st.med)} s · spread ±${st.sd.toFixed(1)} s · best lap ${st.bestK+1}</p>
+    <p class="noprint row-flex" style="margin:-2px 0 8px"><label class="lbl">Mark this section as ${markSel(i,s.mark,'sec-mark')}</label><span class="hint" style="margin:0">Barriers and run-ups get their own off-the-bike breakdown, even on laps you rode them.</span></p><div class="bars">`;
   s.laps.forEach((l,k)=>{if(!l)return;const w=20+80*(l.t-mn+.3)/(mx-mn+.3);h+=`<div class="r"><span>${sw(k)} L${k+1}</span><div class="track"><div class="fill" style="width:${w}%;background:${lapColor(k)};opacity:${inc.includes(k)?1:.45}"></div></div><span>${l.t.toFixed(1)} s <span class="dim">${fmtD(l.t-st.med)}</span></span></div>`;});
   h+=`</div><div class="scroll"><table style="margin-top:8px"><tr><th class="l">Lap</th><th>Avg ${spdU()}</th>${M.hasPower?`<th>Avg ${pwU()}</th><th>Max ${pwU()}</th><th>Coasting</th>`:''}<th>Min ${spdU()}</th><th>Max ${spdU()}</th></tr>`;
   s.laps.forEach((l,k)=>{if(!l)return;h+=`<tr><td class="l${inc.includes(k)?'':' excl'}">${sw(k)} L${k+1}</td><td>${fmtN(cvS(l.v))}</td>${M.hasPower?`<td>${pwF(curR(),l.pw)}</td><td>${pwF(curR(),l.pmax)}</td><td>${l.coast}%</td>`:''}<td>${fmtN(cvS(l.vmin))}</td><td>${fmtN(cvS(l.vmax))}</td></tr>`;});
@@ -1743,10 +1769,11 @@ function renderDetail(){
   else h+='<p class="note">No rideable corners detected in this section.</p>';
   h+=`<p style="margin-top:10px"><button id="clearsel">Clear selection</button></p>`;
   el.innerHTML=h;
+  if($('sec-mark'))$('sec-mark').onchange=e=>setMark(i,e.target.value||null);
   el.querySelectorAll('tr.row').forEach(r=>r.onclick=()=>selectCorner(+r.dataset.j));
   $('clearsel').onclick=()=>{state.sel=null;state.corner=null;state.xr=null;renderAll();};
 }
-$('importfile').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;try{const rec=JSON.parse(await f.text());USER=storeToUser(rec);saveUser();if(Array.isArray(rec.corners)){CN=rec.corners.filter(e=>e&&e.name&&isFinite(e.lat)&&isFinite(e.lon)).map(e=>({lat:e.lat,lon:e.lon,frac:e.frac,name:String(e.name)}));applyCornerNames();saveCornerNames();}state.secMode='user';renderAll();}catch(err){showNote('Could not read that sections file.');}};
+$('importfile').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;try{const rec=JSON.parse(await f.text());USER=storeToUser(rec);saveUser();if(Array.isArray(rec.corners)){CN=rec.corners.filter(e=>e&&e.name&&isFinite(e.lat)&&isFinite(e.lon)).map(e=>({lat:e.lat,lon:e.lon,frac:e.frac,name:String(e.name)}));applyCornerNames();saveCornerNames();}if(Array.isArray(rec.marks)){ST=cleanMarks(rec.marks);applyMarks();saveMarks();}state.secMode='user';renderAll();}catch(err){showNote('Could not read that sections file.');}};
 
 /* =================== heat table =================== */
 function renderHeat(){
@@ -1964,6 +1991,12 @@ function offRider(Mr,zones){
     return {avail,evs};});
 }
 // zones -> events (clusters of dismounts at the same place), for one rider or several riders on the same course
+// detected off-bike zones plus the sections you marked as barriers / run-up (positions on the reference course)
+function offZones(Mr){const z=((Mr||M).zones||[]).map(x=>({...x}));
+  S.forEach(s=>{if(s.mark)z.push({c0:s.s0,c1:s.s1,z0:s.s0,z1:s.s1,manual:true,type:s.mark});});
+  z.sort((a,b)=>a.c0-b.c0);const out=[];
+  z.forEach(x=>{const l=out[out.length-1];if(l&&x.c0<=l.c1+10){l.c1=Math.max(l.c1,x.c1);l.z1=Math.max(l.z1,x.z1);if(x.manual){l.manual=true;l.type=l.type||x.type;}}else out.push(x);});
+  return out;}
 function offBuild(Ms,zones){
   const per=Ms.map(Mr=>offRider(Mr,zones)),out=[];
   zones.forEach((z,zi)=>{
@@ -1972,7 +2005,7 @@ function offBuild(Ms,zones){
     all.forEach(x=>{const c=cl[cl.length-1];if(c&&x.e.s-c.hi<=35){c.items.push(x);c.hi=x.e.s;}else cl.push({hi:x.e.s,items:[x]});});
     const events=cl.filter(c=>new Set(c.items.map(x=>x.ri+':'+x.k)).size>=Math.min(2,Ms.reduce((t,Mr)=>t+Mr.nl,0))).map(c=>({s:mean(c.items.map(x=>x.e.s)),
       laps:Ms.map((Mr,ri)=>Array.from({length:Mr.nl},(_,k)=>{const it=c.items.filter(x=>x.ri===ri&&x.k===k);return it.length?it.reduce((a,b)=>b.e.tf>a.e.tf?b:a).e:null;}))}));
-    if(events.length)out.push({z,zi,avail:per.map(p=>p[zi].avail),events});});
+    if(events.length||z.manual)out.push({z,zi,avail:per.map(p=>p[zi].avail),events});});
   return out;
 }
 // total time on foot per lap (null where part of the course isn't available for that lap)
@@ -1982,7 +2015,8 @@ const offFmt=(key,x)=>!isFinite(x)?'—':key==='tf'?x.toFixed(1):fmtN(cvS(x));
 const offUnit=key=>key==='tf'?'s':spdU();
 function zoneSecs(z,secs){const a=secs.findIndex(s=>z.c0+1>=s.s0&&z.c0+1<s.s1),b=secs.findIndex(s=>z.c1-1>=s.s0&&z.c1-1<s.s1);const ids=[];for(let i=Math.max(0,a);i<=(b<0?a:b);i++)ids.push(`S${secs[i].id} ${secs[i].name}`);return ids.join(' + ');}
 const evFt=s=>Math.round(cvL(interp1(s,M.G,M.ftG)));
-function zoneLabel(z,secs){return `${zoneSecs(z,secs)} · ${evFt(z.c0)}–${evFt(z.c1)} ${lenU()} along the lap`;}
+function zoneLabel(z,secs){return `${z.manual&&MARK_TYPES[z.type]?MARK_TYPES[z.type]+': ':''}${zoneSecs(z,secs)} · ${evFt(z.c0)}–${evFt(z.c1)} ${lenU()} along the lap`;}
+const NO_DISMOUNT='<p class="note" style="margin:2px 0 8px">No dismount found here on any lap: ridden every time (hopped), or off the bike too briefly to detect.</p>';
 function offTakeaway(laps,inc,avail){
   const L=inc.filter(k=>laps[k]);if(L.length<2)return L.length?`Only lap ${L[0]+1} had a dismount here (${laps[L[0]].tf.toFixed(1)} s on foot).`:'';
   const tf=L.map(k=>laps[k].tf),f=L[tf.indexOf(Math.min(...tf))],w=L[tf.indexOf(Math.max(...tf))],vr=L.map(k=>laps[k].vr);
@@ -1990,13 +2024,13 @@ function offTakeaway(laps,inc,avail){
   let t=`Fastest on foot on lap ${f+1} (${laps[f].tf.toFixed(1)} s); slowest lap ${w+1} (${laps[w].tf.toFixed(1)} s). Remount speed varied ${fmtN(cvS(Math.min(...vr)))}–${fmtN(cvS(Math.max(...vr)))} ${spdU()}.`;
   if(stay.length)t+=` Stayed on the bike on lap${stay.length>1?'s':''} ${stay.map(k=>k+1).join(', ')}.`;return t;}
 function renderOffBike(){
-  const el=$('offcard'),B=offBuild([M],M.zones);
+  const el=$('offcard'),B=offBuild([M],offZones(M));
   if(!B.length){el.hidden=true;el.innerHTML='';return;}
   el.hidden=false;const inc=included();
   const head=`<th class="l">&nbsp;</th>${M.lapSum.map((_,k)=>`<th>${sw(k)} L${k+1}</th>`).join('')}<th>Median</th><th>Spread</th>`;
   let h=`<h2>Off the bike</h2><p class="note" style="margin-top:-4px">Where the course has you off the bike (run-ups, barriers), lap by lap. "On foot" = no pedalling and slower than ${uSpd(OFF_MPH,0)}; from dismount to remount, to the nearest second. Speed at dismount is taken 1–2 s before you stop pedalling, remount speed 2 s after you start again. Colours compare each lap with your median (blue = better, red = worse).</p>`;
   B.forEach(b=>{
-    h+=`<h3>${esc(zoneLabel(b.z,S))}</h3>`;
+    h+=`<h3>${esc(zoneLabel(b.z,S))}</h3>`;if(!b.events.length)h+=NO_DISMOUNT;
     b.events.forEach((ev,ei)=>{const laps=ev.laps[0];
       if(b.events.length>1)h+=`<p style="margin:8px 0 2px"><b>Dismount ${ei+1} of ${b.events.length}</b> <span class="dim">about ${Math.round(cvL(interp1(ev.s,M.G,M.ftG)))} ${lenU()} along the lap</span></p>`;
       const tk=offTakeaway(laps,inc,b.avail[0]);if(tk)h+=`<p style="margin:2px 0 6px">${esc(tk)}</p>`;
@@ -2019,11 +2053,11 @@ function offVal(laps,Mr,key){const b=state.cmp.basis,ks=incFor(Mr).filter(k=>lap
 function offTotVal(tot,Mr){const b=state.cmp.basis,v=incFor(Mr).map(k=>tot[k]).filter(x=>x!=null);
   if(b==='typ')return median(v);if(b==='best')return v.length?Math.min(...v):NaN;return tot[b-1]!=null?tot[b-1]:NaN;}
 function renderCmpOff(){
-  const el=$('cmpoff'),{A,B}=CMP,an=esc(A.name),bn=esc(B.name),bd=offBuild([A.M,B.M],RIDERS[PRIMARY].M.zones);
+  const el=$('cmpoff'),{A,B}=CMP,an=esc(A.name),bn=esc(B.name),bd=offBuild([A.M,B.M],offZones(RIDERS[PRIMARY].M));
   if(!bd.length){el.hidden=true;el.innerHTML='';return;}
   el.hidden=false;
   let h=`<h2>Off the bike: ${an} vs ${bn}</h2><p class="note" style="margin-top:-4px">${basisLabel()} for each rider. "On foot" = no pedalling and slower than ${uSpd(OFF_MPH,0)}, from dismount to remount. Δ = ${bn} minus ${an}; for time on foot blue means ${an} was quicker, for speeds blue means ${an} was faster.</p>`;
-  bd.forEach(b=>{h+=`<h3>${esc(zoneLabel(b.z,S))}</h3>`;
+  bd.forEach(b=>{h+=`<h3>${esc(zoneLabel(b.z,S))}</h3>`;if(!b.events.length)h+=NO_DISMOUNT;
     b.events.forEach((ev,ei)=>{if(b.events.length>1)h+=`<p style="margin:8px 0 2px"><b>Dismount ${ei+1} of ${b.events.length}</b> <span class="dim">about ${Math.round(cvL(interp1(ev.s,M.G,M.ftG)))} ${lenU()} along the lap</span></p>`;
       const tfA=offVal(ev.laps[0],A.M,'tf'),tfB=offVal(ev.laps[1],B.M,'tf');
       if(isFinite(tfA)&&isFinite(tfB))h+=`<p style="margin:2px 0 6px">${Math.abs(tfB-tfA)<0.25?'Both spend about the same time on foot here':`<b>${esc(tfB>tfA?A.name:B.name)}</b> is on foot ${Math.abs(tfB-tfA).toFixed(1)} s less`} (${tfA.toFixed(1)} s vs ${tfB.toFixed(1)} s).</p>`;
@@ -2096,12 +2130,12 @@ function csvCornerCmp(){const {A,B,sa}=CMP,pwc=A.M.hasPower&&B.M.hasPower,bl=bas
   CR.forEach((c,j)=>{const va=cornerVal(A,j,'vmin'),vb=cornerVal(B,j,'vmin'),ta=cornerVal(A,j,'t'),tb=cornerVal(B,j,'t');
     rows.push([c.id,c.cname||'',c.kind,cdir(c),secOfC(sa,c),cf(cvS(va)),cf(cvS(vb)),cf(cvS(vb-va)),cf(ta),cf(tb),cf(tb-ta),pv(A,j),pv(B,j)]);});
   return rows;}
-function csvOff(r,secs,zones){const bd=offBuild([r.M],zones||r.M.zones);
+function csvOff(r,secs,zones){const bd=offBuild([r.M],zones||offZones(r.M));
   const rows=[['Zone','Section','Dismount',`Position on lap (${lenU()})`,'Lap',`Speed at dismount (${spdU()})`,'Time on foot (s)',`Slowest speed (${spdU()})`,`Remount speed (${spdU()})`]];
   bd.forEach((b,bi)=>b.events.forEach((ev,ei)=>ev.laps[0].forEach((e,k)=>{if(!e)return;rows.push([bi+1,zoneSecs(b.z,secs),`${ei+1} of ${b.events.length}`,evFt(ev.s),k+1,cf(cvS(e.vd)),cf(e.tf,1),cf(cvS(e.vmin)),cf(cvS(e.vr))]);})));
   const tot=offTotals(bd,0,r.M.nl);rows.push([]);rows.push(['','Total time on foot per lap (s)','','','Lap'].concat([]));tot.forEach((t,k)=>rows.push(['','','','',k+1,'',t==null?'':cf(t,1)]));
   return rows;}
-function csvOffCmp(){const {A,B,sa}=CMP,bd=offBuild([A.M,B.M],RIDERS[PRIMARY].M.zones),bl=basisLabel();
+function csvOffCmp(){const {A,B,sa}=CMP,bd=offBuild([A.M,B.M],offZones(RIDERS[PRIMARY].M)),bl=basisLabel();
   const rows=[['Zone','Section','Dismount',`Position on lap (${lenU()})`,'Measure','Unit',`${dn(A)} ${bl}`,`${dn(B)} ${bl}`,`Difference ${dn(B)} minus ${dn(A)}`]];
   bd.forEach((b,bi)=>b.events.forEach((ev,ei)=>OFFM.forEach(([key,lab])=>{const va=offVal(ev.laps[0],A.M,key),vb=offVal(ev.laps[1],B.M,key),f=key==='tf'?(x=>cf(x,1)):(x=>cf(cvS(x)));
     rows.push([bi+1,zoneSecs(b.z,sa),`${ei+1} of ${b.events.length}`,evFt(ev.s),lab,offUnit(key),f(va),f(vb),isFinite(vb-va)?f(vb-va):'']);})));
@@ -2116,8 +2150,8 @@ function exportItems(){
   if(state.view==='cmp'){const {A,B,sa,sb}=CMP,pair=slug(dn(A))+'_vs_'+slug(dn(B));
     const it=[{title:'Section comparison',desc:`${dn(A)} vs ${dn(B)}, ${basisLabel()}: one row per section`,file:pair+'_section_comparison.csv',make:csvSecCmp},
       {title:'Corner comparison',desc:`${dn(A)} vs ${dn(B)}, ${basisLabel()}: one row per corner`,file:pair+'_corner_comparison.csv',make:csvCornerCmp}];
-    if(offBuild([A.M,B.M],RIDERS[PRIMARY].M.zones).length)it.splice(2,0,{title:'Off the bike comparison',desc:`${dn(A)} vs ${dn(B)}, ${basisLabel()}: dismount speed, time on foot, slowest and remount speed`,file:pair+'_off_bike_comparison.csv',make:csvOffCmp});
-    [[A,sa],[B,sb]].forEach(([r,secs])=>{if(hasOff(r.M,RIDERS[PRIMARY].M.zones))it.push({title:`${r.name}: off the bike`,desc:'one row per dismount and lap',file:slug(r.name)+'_off_bike.csv',make:()=>csvOff(r,secs,RIDERS[PRIMARY].M.zones)});it.push(
+    if(offBuild([A.M,B.M],offZones(RIDERS[PRIMARY].M)).length)it.splice(2,0,{title:'Off the bike comparison',desc:`${dn(A)} vs ${dn(B)}, ${basisLabel()}: dismount speed, time on foot, slowest and remount speed`,file:pair+'_off_bike_comparison.csv',make:csvOffCmp});
+    [[A,sa],[B,sb]].forEach(([r,secs])=>{if(hasOff(r.M,offZones(RIDERS[PRIMARY].M)))it.push({title:`${r.name}: off the bike`,desc:'one row per dismount and lap',file:slug(r.name)+'_off_bike.csv',make:()=>csvOff(r,secs,offZones(RIDERS[PRIMARY].M))});it.push(
       {title:`${r.name}: section times by lap`,desc:'one row per section',file:slug(r.name)+'_section_times.csv',make:()=>csvSections(r,secs)},
       {title:`${r.name}: corners by lap`,desc:'one row per corner and lap',file:slug(r.name)+'_corners_by_lap.csv',make:()=>csvCorners(r,secs)},
       {title:`${r.name}: lap summary`,desc:'one row per lap',file:slug(r.name)+'_lap_summary.csv',make:()=>csvLaps(r)});});
@@ -2126,7 +2160,7 @@ function exportItems(){
   const items=[{title:'Section times by lap',desc:'one row per section: length, every lap, median, best, SD',file:n+'_section_times.csv',make:()=>csvSections(r,S)},
     {title:'Corners by lap',desc:'one row per corner and lap: entry, apex and exit speed, time, exit power',file:n+'_corners_by_lap.csv',make:()=>csvCorners(r,S)},
     {title:'Lap summary',desc:'one row per lap: time, speed, power, NP, coasting, cadence'+(state.showHR&&r.M.hasHR?', heart rate':''),file:n+'_lap_summary.csv',make:()=>csvLaps(r)}];
-  if(hasOff(r.M,r.M.zones))items.splice(2,0,{title:'Off the bike',desc:'one row per dismount and lap: speed at dismount, time on foot, slowest and remount speed',file:n+'_off_bike.csv',make:()=>csvOff(r,S)});
+  if(hasOff(r.M,offZones(r.M)))items.splice(2,0,{title:'Off the bike',desc:'one row per dismount and lap: speed at dismount, time on foot, slowest and remount speed',file:n+'_off_bike.csv',make:()=>csvOff(r,S)});
   return items;
 }
 function downloadCsv(name,rows){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\uFEFF'+csvText(rows)],{type:'text/csv;charset=utf-8'}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);}
