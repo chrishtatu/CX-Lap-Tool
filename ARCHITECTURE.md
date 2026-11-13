@@ -172,21 +172,18 @@ All internal maths runs in one consistent set of units (metres along the course,
 
 ## 11. Testing
 
-There's no test framework in the repo. During development the app was driven in **headless Chrome**:
-1. A small script injects a test snippet into a copy of `index.html`.
-2. The snippet calls `window.CXApp` (`handleBuffer`, `addRaw`, `run`, `replay.seek`, …) with real `.fit` files and synthetic variants: time-warped "teammates", detours, shortcuts, shifted dates.
-3. Results are read back from the DOM.
+Tests live in [`tests/`](tests/README.md) and run in headless Chrome: `python3 tests/run.py`. There's nothing to install beyond Python 3 and Chrome.
 
-Two real races act as **regression anchors**. Any engine change has to reproduce their numbers exactly:
+- **How:** each case is a JavaScript snippet injected into a copy of `index.html`. It drives the app through `window.CXApp` and clicks real buttons, and the runner reads the `check()` results back.
+- **Synthetic races (committed):** `tests/lib/synth.js` generates a made-up cyclocross race with a known truth (lap times, run-up position). That covers laps, first-lap routes, multi-rider views, different days and venues, replay, marks, saving, touch and units, with no personal data in the repo.
+- **Real races (local only):** `tests/local/` runs on real .fit files in `tests/fixtures/`, which git ignores. These are the **regression anchors**: any engine change has to reproduce their numbers exactly.
 
 | Race | Start | Laps | Corners | Auto sections |
 |---|---|---|---|---|
 | West Hill | 75 s | 463.4 / 455.1 / 466.3 / 466.9 / 464.3 / 460.8 s | 33 | 16 |
 | Treehouse | 12 s | 473 / 503 / 501.7 / 503.9 / 499.9 s (lap 1 cut ≈ 990–2,360 ft) | 45 | 18 |
 
-Layout and print were checked with screenshots and printed PDFs; touch with simulated pointer events.
-
-*If this grows:* the test snippets could become a `tests/` folder with a small runner script, and `CXApp` is already the seam for that.
+Run the suite after any change. Engine changes in particular can shift numbers in ways that only show up as a few tenths of a second.
 
 ## 12. Known limitations
 

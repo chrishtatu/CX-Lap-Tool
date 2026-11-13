@@ -1645,17 +1645,17 @@ function renderMap(){
     if(ED.tool==='draw'&&ED.start!=null){const v=snapCourse(w,ED.start+4,M.Lref+1,ED.end==null?ED.start:ED.end);if(v!=null){ED.end=v;updateDraw();}}};
   svg.onpointerdown=ev=>{const t=ev.target;
     if(ev.pointerType==='touch'){TOUCH.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
-      if(TOUCH.size>=2){const [a,b]=[...TOUCH.values()];PINCH={d:Math.hypot(a.x-b.x,a.y-b.y),mx:(a.x+b.x)/2,my:(a.y+b.y)/2};if(PAN){PAN.moved=true;PAN.pinch=true;}try{svg.setPointerCapture(ev.pointerId);}catch(e){}ev.preventDefault();return;}
+      if(TOUCH.size>=2){const [a,b]=[...TOUCH.values()];PINCH={d:Math.hypot(a.x-b.x,a.y-b.y),mx:(a.x+b.x)/2,my:(a.y+b.y)/2};if(PAN){PAN.moved=true;PAN.pinch=true;}capP(svg,ev);ev.preventDefault();return;}
       // at full view, leave one-finger touches to the page (scrolling) unless editing; taps are still handled on pointerup
       if(!(state.mz.z>1.001)&&!state.editing&&!state.pickLine){if(t.classList.contains('msec')||t.classList.contains('mcor'))return;PAN={x:ev.clientX,y:ev.clientY,vx:state.mz.vx,vy:state.mz.vy,moved:false,tap:true};return;}}
     const onLine=t.classList.contains('msec')||t.classList.contains('mcor')||(t.dataset&&t.dataset.cut!=null);
-    if(!onLine||ev.button===1){PAN={x:ev.clientX,y:ev.clientY,vx:state.mz.vx,vy:state.mz.vy,moved:false};svg.setPointerCapture(ev.pointerId);ev.preventDefault();return;}
+    if(!onLine||ev.button===1){PAN={x:ev.clientX,y:ev.clientY,vx:state.mz.vx,vy:state.mz.vy,moved:false};capP(svg,ev);ev.preventDefault();return;}
     if(!state.editing)return;
     if(t.dataset&&t.dataset.cut!=null){const ci=+t.dataset.cut;
-      if(ED.tool==='adjust'){ED.drag={ci,orig:USER.cuts[ci],cur:USER.cuts[ci]};svg.setPointerCapture(ev.pointerId);ev.preventDefault();updateDraw();}
+      if(ED.tool==='adjust'){ED.drag={ci,orig:USER.cuts[ci],cur:USER.cuts[ci]};capP(svg,ev);ev.preventDefault();updateDraw();}
       else{ED.start=USER.cuts[ci];ED.end=null;ED.done=false;renderAll();}
       return;}
-    if(ED.tool==='draw'&&ED.start!=null){ED.down=true;svg.setPointerCapture(ev.pointerId);ev.preventDefault();}};
+    if(ED.tool==='draw'&&ED.start!=null){ED.down=true;capP(svg,ev);ev.preventDefault();}};
   svg.onpointerup=ev=>{
     if(ev.pointerType==='touch'){const had=TOUCH.size;TOUCH.delete(ev.pointerId);if(TOUCH.size<2)PINCH=null;if(had>=2||TOUCH.size){if(PAN)PAN.moved=true;if(!TOUCH.size)PAN=null;return;}}
     if(PAN){const p=PAN;PAN=null;svg.classList.remove('panning');if(p.moved||Math.hypot(ev.clientX-p.x,ev.clientY-p.y)>10)return;
@@ -1676,6 +1676,7 @@ function renderMap(){
     if(!state.editing||ED.tool!=='draw'||ED.start==null)return;ev.preventDefault();stepEnd(ev.deltaY>0?1:-1,ev.shiftKey);ED.lock={x:ev.clientX,y:ev.clientY};};
   updateDraw();
 }
+const capP=(el,ev)=>{try{el.setPointerCapture(ev.pointerId);}catch(e){}}; // capture can fail for a pointer the browser no longer tracks; dragging still works without it
 let PAN=null,mapRaf=0,PINCH=null;const TOUCH=new Map();
 function mapTapSelect(ev){if(!M||!mapGeom)return;const svg=$('map');const pt=svg.createSVGPoint();pt.x=ev.clientX;pt.y=ev.clientY;const p=pt.matrixTransform(svg.getScreenCTM().inverse());
   const r=svg.getBoundingClientRect(),pxPerUnit=r.width/(mapGeom.W/state.mz.z);
@@ -2680,7 +2681,9 @@ if(window.CX_PRELOAD){
 }
 window.CXApp={get COURSE(){return COURSE;},replay:{seek:t=>{if(!RP.ents.length)rpBuild();RP.on=true;RP.t=Math.max(0,Math.min(RP.dur,t));rpUpdate();return rpSnap();},play:()=>rpPlay(true),pause:()=>rpPlay(false),reset:rpReset,snap:rpSnap,get dur(){return RP.dur;},get state(){return {on:RP.on,playing:RP.playing,t:RP.t,speed:RP.speed,whole:RP.whole,n:RP.ents.length};},setWhole:v=>{RP.whole=!!v;RP.t=0;rpBuild();rpUI();}},get LB(){return LB;},run:(...a)=>run(...a),get mapGeom(){return mapGeom;},ED,commitDraw,stepEnd,updateDraw,get USER(){return USER;},handleBuffer:(buf,name)=>{const pf=parseFit(buf);RIDERS=[];PRIMARY=0;COURSE.lapLine=null;COURSE.lapHeading=null;COURSE.lapSplit='auto';state.view=0;addRiderRaw(rawFrom(pf),name);return run();},
   addBuffer:(buf,name)=>{addRiderRaw(rawFrom(parseFit(buf)),name);return run();},
-  addRaw:(raw,name)=>{addRiderRaw(raw,name,name);return run();},get RIDERS(){return RIDERS;},get PRIMARY(){return PRIMARY;},state,get M(){return M;},get S(){return S;},get AUTO(){return AUTO;},addCut,renderAll,selectSection,selectCorner,cornerAnalysis,csvCell,get CN(){return CN;},get COURSE(){return COURSE;}};
+  addRaw:(raw,name)=>{addRiderRaw(raw,name,name);return run();},
+  // tests: start a fresh analysis from already-parsed series (same as handleBuffer, without the FIT step)
+  loadRaw:(raw,name)=>{RIDERS=[];PRIMARY=0;COURSE.lapLine=null;COURSE.lapHeading=null;COURSE.lapSplit='auto';state.view=0;addRiderRaw(raw,name,name);return run();},get RIDERS(){return RIDERS;},get PRIMARY(){return PRIMARY;},state,get M(){return M;},get S(){return S;},get AUTO(){return AUTO;},addCut,renderAll,selectSection,selectCorner,cornerAnalysis,csvCell,get CN(){return CN;},get COURSE(){return COURSE;}};
 })();
 </script>
 </body>
