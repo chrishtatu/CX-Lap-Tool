@@ -19,3 +19,11 @@ function captureDownloads(){const blobs=[];URL.createObjectURL=b=>{blobs.push(b)
 // simulated pointer events on the map (touch or mouse)
 function pointer(type,id,x,y,kind){const tgt=type==='pointerdown'?(document.elementFromPoint(x,y)||$('map')):$('map');
   tgt.dispatchEvent(new PointerEvent(type,{pointerId:id,pointerType:kind||'touch',clientX:x,clientY:y,bubbles:true,cancelable:true,button:0,isPrimary:id===1}));return tgt;}
+
+// Keep analysis tests independent of optional online mapping. Map cases replace these fakes.
+window.maplibregl={Map:class{constructor(){throw new Error('Map provider unavailable in this test');}}};
+const appendTestHead=document.head.appendChild.bind(document.head);
+document.head.appendChild=function(el){
+  if(el.dataset&&'cxBasemap' in el.dataset){setTimeout(()=>el.onerror(),0);return el;}
+  return appendTestHead(el);
+};

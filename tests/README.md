@@ -32,6 +32,11 @@ a different venue, a shortcut or extra loop on lap 1, a start past the lap line,
 | `07_save_report` | saved HTML holds the app, both riders and the settings |
 | `08_phone_touch` | tap-to-select, pinch zoom, one-finger and mouse pan, Fit |
 | `09_units` | metric labels, unchanged results, replay cursor after unit changes |
+| `10_map_background` | automatic loading, camera bounds and zoom, selection and replay, graphics-context failure, retry, reconnection, Simple/Aerial switching, preserved interactions, rapid changes and Simple defaults |
+| `11_map_offline` | failed resource downloads, unchanged analysis, offline interactions, and saved reports reopening offline without requesting the library |
+| `12_map_timeouts` | delayed downloads, disconnecting during a pending map, stalled tiles, and preserved section/replay interactions |
+
+Map lifecycle tests simulate the external provider; they do not download tiles or depend on a third-party service. Visual integration is checked separately with a real course and the live background.
 
 ## Real races (`local/`, not committed)
 Cases in `local/` use your own .fit files from `fixtures/`, which git ignores (rides contain GPS tracks). They are skipped

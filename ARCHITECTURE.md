@@ -22,11 +22,11 @@ This document is for anyone reading or changing the code. It explains how `index
 
 ## 1. The big picture
 
-The whole app is **one HTML file** with no libraries, no build step and no server. It parses Garmin `.fit` files in the browser, works out laps, sections and corners, and draws everything with plain SVG.
+The app is **one HTML file** with no build step and no server. Its offline analysis has no library dependencies; the optional online map loads a pinned MapLibre GL JS release on demand. It parses Garmin `.fit` files in the browser, works out laps, sections and corners, and draws everything with plain SVG.
 
 **Why one file, no dependencies**
 - **Shareable:** you can email it, put it on a USB stick, or host it as a static page (GitHub Pages). It also works from `file://` with no internet.
-- **Private:** ride data never leaves the browser. There is no upload and no account.
+- **Private:** ride data never leaves the browser. There is no upload and no account. Opening a course online requests a basemap for the viewed area; the FIT file remains local.
 - **Durable:** nothing to install, nothing that breaks when a library updates.
 - **Self-saving:** "Save report as HTML" writes a copy of the app with the data embedded, so a report is just another copy of the same file (see [§8](#8-state-persistence-and-saved-reports)).
 
@@ -149,6 +149,16 @@ Overlapping or close-together stretches (within 30 m) are merged so no time is c
 - **Charts (`lineChart`):** x axis is distance along the lap (feet internally), shared by all charts. Drag to zoom, double-click to reset.
 - **Replay (`RP`, `rp*`):** each dot's time-at-position (`tg`) is inverted to get *position at time t* (`mkInv`, `invAt`). Gaps (skipped or off-course stretches) hide the dot. Only the dot layer is redrawn each frame.
   - **Sync different lap (`syncTg`):** rebuilds lap 1's timeline. At a shortcut the dot jumps to the rejoin point and *waits* for as long as the other laps typically take over the stretch. Where lap 1's route was longer, the dot runs the regular course at the other laps' pace instead. Either way it leaves the stretch at its estimated time and keeps whatever gap it had going in.
+
+### Optional map background
+
+The original SVG remains the course renderer and interaction surface with or without a background. A non-interactive MapLibre map is an optional layer behind it. `backgroundBounds()` converts the SVG's current viewBox, including any aspect-ratio letterboxing, from the model's metre grid to geographical bounds. `syncBackground()` fits MapLibre to those bounds after pan, zoom or resize. Section selection, editing, replay and analysis stay on their existing paths.
+
+Opening a course automatically loads MapLibre GL JS 6.18.0 and its stylesheet from unpkg, then the muted OpenFreeMap Positron style (Dark when the system uses dark mode). Download and tile readiness have bounded timeouts. Offline events, resource failures and lost graphics contexts hide and dispose the background without affecting the SVG. A generation token prevents a late asynchronous load from reviving a disconnected or replaced map. Reconnection retries automatically; resource failures offer a Retry map button. Attribution is visible only with the basemap and changes to match the selected provider.
+
+The Map selector at the bottom-right of the map offers Simple and Aerial (US). Aerial uses the public USGSImageryOnly raster cache, capped at its supported zoom 16 and overzoomed for closer views. Changing styles replaces only the background instance; the SVG viewport, section selection and replay remain intact. Every new analysis and saved-report opening starts with Simple; style choice is not persisted.
+
+The canvas retains its drawing buffer for embedded previews and screen capture. The background uses an explicit non-negative stacking layer below the SVG, without a CSS filter on the WebGL canvas. New analyses reset the background lifecycle; ordinary selections reuse it. There is no saved on/off preference. Saved reports use the same automatic behavior, and print retains the offline SVG view. `CXApp.background` exposes retry, status and geographical viewport bounds for lifecycle tests; committed tests simulate successful and failed providers without requiring network access.
 
 ## 8. State, persistence and saved reports
 

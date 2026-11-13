@@ -160,6 +160,26 @@ body.lbview .pair-only{display:none!important}
 .lbt td.g,.lbt th.g{border-left:1px solid var(--grid)}
 .rpg{width:auto;font-size:12px}.rpg td,.rpg th{padding:1px 8px}
 #replaybar input[type=range]{accent-color:var(--ink)}
+/* ---- optional map background ---- */
+.map-heading{display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.map-heading h2{margin:0}
+.map-heading .row-flex{gap:8px}
+.map-heading button{min-height:34px}
+.map-frame{position:relative;isolation:isolate;overflow:hidden}
+#basemap{position:absolute;inset:0;z-index:0;opacity:0;pointer-events:none}
+.map-frame.with-basemap #basemap{opacity:.85}
+.map-frame #map{position:relative;z-index:1}
+#basemap .maplibregl-canvas{position:absolute;left:0;top:0}
+.map-style-control{position:absolute;right:8px;bottom:36px;z-index:2;background:var(--surface);border:1px solid var(--grid);border-radius:7px;padding:4px 6px;box-shadow:0 1px 5px #0002}
+.map-style-control .lbl{gap:6px;color:var(--ink)}
+.map-style-control select{font-size:12px;min-height:30px}
+.map-attribution{position:absolute;right:0;bottom:0;z-index:2;background:var(--surface);color:var(--ink2);padding:2px 5px;font-size:11px;line-height:1.4;max-width:75%;text-align:right}
+.map-attribution a{color:inherit}
+#mapstatus{font-size:12px;color:var(--ink2);font-weight:400}
+@media (pointer:coarse){.map-heading button{min-height:44px;min-width:44px}}
+@media (pointer:coarse){.map-style-control select{min-height:44px}}
+@media (max-width:700px){.map-heading .row-flex{width:100%;justify-content:space-between}}
+
 /* ---- print ---- */
 body.printing .wrap{width:700px;max-width:700px;margin:0;padding:0}
 :root:root .viz-root.printing{color-scheme:light;
@@ -168,6 +188,7 @@ body.printing .wrap{width:700px;max-width:700px;margin:0;padding:0}
     --l1:#2a78d6; --l2:#eb6834; --l3:#1baf7a; --l4:#eda100; --l5:#e87ba4; --l6:#008300; --l7:#6250d6; --l8:#e34948;
     --cool:#2a78d6; --warm:#e34948; --mid:#c9c8c1; --midcell:#f0efec; --good:#006300; --bad:#d03b3b;}
 @media print{
+  #basemap,.map-heading .row-flex,.map-style-control,.map-attribution{display:none!important}
   #lbfind td.l,#detail td.l{white-space:nowrap} #lbfind th{white-space:normal}
   @page{margin:12mm}
   :root:root .viz-root{color-scheme:light;
@@ -298,7 +319,9 @@ body.printing .wrap{width:700px;max-width:700px;margin:0;padding:0}
 
     <div class="grid2">
       <div class="card" id="mapcard">
-        <h2>Course map <span class="pill" id="secsetpill"></span></h2>
+        <div class="map-heading"><h2>Course map <span class="pill" id="secsetpill"></span></h2>
+          <div class="row-flex"><span id="mapstatus" role="status" aria-live="polite"></span><button id="map-retry" hidden>Retry map</button></div>
+        </div>
         <div class="row-flex" style="margin-bottom:6px">
           <label class="lbl">Color by <select id="mapmode">
             <option value="delta">Lap vs your typical lap (Δ vs median)</option>
@@ -311,7 +334,12 @@ body.printing .wrap{width:700px;max-width:700px;margin:0;padding:0}
         </div>
         <div id="mapbanner"></div>
         <div id="replaybar" class="noprint"></div>
-        <svg id="map"></svg>
+        <div id="mapframe" class="map-frame">
+          <div id="basemap" aria-hidden="true"></div>
+          <svg id="map"></svg>
+          <div class="map-style-control"><label class="lbl">Map <select id="map-style" aria-label="Map style"><option value="simple">Simple</option><option value="aerial">Aerial (US)</option></select></label></div>
+          <div id="map-attribution" class="map-attribution" hidden><span id="map-credit-simple"><a href="https://openfreemap.org/" target="_blank" rel="noopener noreferrer">OpenFreeMap</a> · <a href="https://openmaptiles.org/" target="_blank" rel="noopener noreferrer">© OpenMapTiles</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap</a></span><span id="map-credit-aerial" hidden><a href="https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer" target="_blank" rel="noopener noreferrer">USDA · USGS The National Map</a></span></div>
+        </div>
         <div class="legendbar" id="maplegend"></div>
         <div id="replaygaps" class="noprint scroll" style="margin-top:6px"></div>
         <p class="hint" id="maphint"><span class="mousehint">Click a section or a corner dot to see details and zoom the charts below. Arrows show riding direction. Ctrl + scroll zooms the map; drag empty space to pan.</span><span class="touchhint">Tap a section or corner to see details. Arrows show riding direction. Pinch to zoom (or use + and −); once zoomed in, drag with one finger to move around. At full view a one-finger swipe scrolls the page.</span></p>
@@ -1557,6 +1585,110 @@ function renderFindings(){
   el.querySelectorAll('a.sec').forEach(a=>a.onclick=()=>{selectSection(+a.dataset.sec);$('mapcard').scrollIntoView({behavior:'smooth',block:'center'});});
 }
 
+/* ---- optional online background; the SVG course and all interactions stay local ---- */
+const MAPLIBRE_VERSION='6.18.0';
+const MAPLIBRE_URL=`https://unpkg.com/maplibre-gl@${MAPLIBRE_VERSION}/dist/maplibre-gl.mjs`;
+// The public USGS cache ends at zoom 16; overzoom those tiles instead of requesting missing levels.
+const AERIAL_STYLE={version:8,sources:{aerial:{type:'raster',tiles:['https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}'],tileSize:256,maxzoom:16}},layers:[{id:'aerial',type:'raster',source:'aerial',paint:{'raster-saturation':-.35}}]};
+const backgroundStyle=()=>BG.mode==='aerial'?AERIAL_STYLE:`https://tiles.openfreemap.org/styles/${matchMedia('(prefers-color-scheme: dark)').matches?'dark':'positron'}`;
+const BG={map:null,sdk:null,load:null,token:0,timer:null,status:'idle',observer:null,css:null,style:null,model:null,mode:'simple'};
+// Add geographical context automatically; analysis never waits for the background.
+function updateBackgroundControls(){
+  const live=BG.status==='ready'&&!PRINTING;
+  $('mapframe').classList.toggle('with-basemap',live);
+  $('map-attribution').hidden=!live;
+  $('map-style').value=BG.mode;
+  $('map-credit-simple').hidden=BG.mode!=='simple';
+  $('map-credit-aerial').hidden=BG.mode!=='aerial';
+  $('map-retry').hidden=BG.status!=='unavailable';
+  const msg=BG.status==='loading'?'Loading background…':BG.status==='offline'?'Offline · course available':BG.status==='unavailable'?'Background unavailable · course available':'';
+  if($('mapstatus').textContent!==msg)$('mapstatus').textContent=msg;
+}
+function disposeBackground(){
+  BG.token++;clearTimeout(BG.timer);BG.timer=null;
+  if(BG.map){try{BG.map.remove();}catch(e){}BG.map=null;}
+}
+function backgroundFallback(reason){
+  disposeBackground();BG.status=reason==='offline'?'offline':'unavailable';
+  updateBackgroundControls();
+}
+function loadMapLibrary(){
+  if(BG.sdk)return Promise.resolve(BG.sdk);
+  if(BG.load)return BG.load;
+  // Both resources are optional and bounded; neither can delay ride analysis.
+  const css=document.createElement('link');css.rel='stylesheet';css.href=`https://unpkg.com/maplibre-gl@${MAPLIBRE_VERSION}/dist/maplibre-gl.css`;css.dataset.cxBasemap='';
+  const style=new Promise((resolve,reject)=>{css.onload=resolve;css.onerror=()=>reject(new Error('Map stylesheet unavailable'));});
+  if(BG.css)BG.css.remove();BG.css=css;document.head.appendChild(css);
+  const script=window.maplibregl?Promise.resolve(window.maplibregl):import(MAPLIBRE_URL);
+  let timer;
+  BG.load=Promise.race([Promise.all([style,script]).then(([,sdk])=>sdk),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Map download timed out')),7000);})])
+    .then(sdk=>{BG.sdk=sdk;return sdk;}).finally(()=>{clearTimeout(timer);BG.load=null;});
+  return BG.load;
+}
+// The SVG uses a local metre grid. Expand its viewBox by any letterboxing before
+// fitting the background, so roads and the course stay aligned at every aspect ratio.
+function backgroundBounds(){
+  const svg=$('map'),r=svg.getBoundingClientRect(),v=svg.viewBox.baseVal;
+  if(!M||!mapGeom||r.width<1||r.height<1||!v.width||!v.height)return null;
+  const scale=Math.min(r.width/v.width,r.height/v.height),w=r.width/scale,h=r.height/scale;
+  const x=v.x-(w-v.width)/2,y=v.y-(h-v.height)/2,g=mapGeom;
+  const sw=M.toLL(x+g.minx-g.pad,g.maxy-(y+h-g.pad)),ne=M.toLL(x+w+g.minx-g.pad,g.maxy-(y-g.pad));
+  return [[sw.lon,sw.lat],[ne.lon,ne.lat]];
+}
+function syncBackground(){
+  if(!BG.map||PRINTING)return;
+  const bounds=backgroundBounds();if(!bounds)return;
+  try{BG.map.resize();BG.map.fitBounds(bounds,{padding:0,duration:0,maxZoom:24});}
+  catch(e){backgroundFallback('unavailable');}
+}
+async function startBackground(){
+  if(PRINTING||!M)return;
+  if(navigator.onLine===false){backgroundFallback('offline');return;}
+  if(BG.map){syncBackground();return;}
+  if(BG.status==='loading')return;
+  disposeBackground();const token=BG.token;
+  BG.status='loading';updateBackgroundControls();
+  try{
+    const sdk=await loadMapLibrary();
+    if(token!==BG.token)return;
+    if(PRINTING){BG.status='idle';return;}
+    // Retain the canvas contents for embedded previews and screen capture.
+    const map=new sdk.Map({container:'basemap',style:backgroundStyle(),interactive:false,attributionControl:false,maplibreLogo:false,renderWorldCopies:false,fadeDuration:0,canvasContextAttributes:{preserveDrawingBuffer:true}});
+    BG.map=map;BG.style=backgroundStyle();
+    const ready=()=>{
+      if(token!==BG.token||map!==BG.map)return;
+      if(map.isStyleLoaded()&&map.areTilesLoaded()){
+        clearTimeout(BG.timer);BG.timer=null;BG.status='ready';updateBackgroundControls();
+      }
+    };
+    // A failed style/tile service or a lost WebGL context always leaves a usable course.
+    map.on('idle',ready);
+    map.on('error',()=>{if(token===BG.token&&BG.status==='ready')backgroundFallback(navigator.onLine===false?'offline':'unavailable');});
+    map.on('webglcontextlost',()=>{if(token===BG.token)backgroundFallback('unavailable');});
+    BG.timer=setTimeout(()=>{if(token===BG.token&&BG.status!=='ready')backgroundFallback(navigator.onLine===false?'offline':'unavailable');},8000);
+    syncBackground();
+  }catch(e){if(token===BG.token)backgroundFallback(navigator.onLine===false?'offline':'unavailable');}
+}
+function retryBackground(){
+  if(BG.status==='offline'||BG.status==='unavailable')BG.status='idle';
+  startBackground();
+}
+function maintainBackground(){
+  if(BG.model!==RIDERS[PRIMARY].M){disposeBackground();BG.model=RIDERS[PRIMARY].M;BG.mode='simple';BG.status='idle';}
+  if(BG.map&&BG.status==='ready'&&BG.style!==backgroundStyle()){
+    BG.style=backgroundStyle();BG.status='loading';BG.map.setStyle(BG.style);
+    clearTimeout(BG.timer);const token=BG.token;
+    BG.timer=setTimeout(()=>{if(token===BG.token&&BG.status!=='ready')backgroundFallback('unavailable');},8000);
+  }
+  updateBackgroundControls();syncBackground();
+  if(BG.status==='idle')startBackground();
+  if(!BG.observer&&window.ResizeObserver){BG.observer=new ResizeObserver(()=>syncBackground());BG.observer.observe($('mapframe'));}
+}
+$('map-retry').onclick=retryBackground;
+$('map-style').onchange=e=>{BG.mode=e.target.value==='aerial'?'aerial':'simple';disposeBackground();BG.status='idle';startBackground();};
+addEventListener('offline',()=>{if(M)backgroundFallback('offline');});
+addEventListener('online',()=>{if(M)retryBackground();});
+
 /* =================== map =================== */
 let mapGeom=null;
 function renderMap(){
@@ -1674,7 +1806,7 @@ function renderMap(){
   svg.onwheel=ev=>{
     if(ev.ctrlKey||ev.metaKey){ev.preventDefault();zoomMap(Math.exp(-ev.deltaY*0.0025),ev);return;}
     if(!state.editing||ED.tool!=='draw'||ED.start==null)return;ev.preventDefault();stepEnd(ev.deltaY>0?1:-1,ev.shiftKey);ED.lock={x:ev.clientX,y:ev.clientY};};
-  updateDraw();
+  updateDraw();maintainBackground();
 }
 const capP=(el,ev)=>{try{el.setPointerCapture(ev.pointerId);}catch(e){}}; // capture can fail for a pointer the browser no longer tracks; dragging still works without it
 let PAN=null,mapRaf=0,PINCH=null;const TOUCH=new Map();
@@ -2679,7 +2811,7 @@ if(window.CX_PRELOAD){
   else{RIDERS.push({name:riderName(pr.file,1),file:pr.file,RAW:pr.raw,opt:{startSec:(pr.opt||{}).startSec??null,finishSec:(pr.opt||{}).finishSec??null},M:null,err:null});COURSE.lapLine=(pr.opt||{}).lapLine||null;}
   run(pr.user);
 }
-window.CXApp={get COURSE(){return COURSE;},replay:{seek:t=>{if(!RP.ents.length)rpBuild();RP.on=true;RP.t=Math.max(0,Math.min(RP.dur,t));rpUpdate();return rpSnap();},play:()=>rpPlay(true),pause:()=>rpPlay(false),reset:rpReset,snap:rpSnap,get dur(){return RP.dur;},get state(){return {on:RP.on,playing:RP.playing,t:RP.t,speed:RP.speed,whole:RP.whole,n:RP.ents.length};},setWhole:v=>{RP.whole=!!v;RP.t=0;rpBuild();rpUI();}},get LB(){return LB;},run:(...a)=>run(...a),get mapGeom(){return mapGeom;},ED,commitDraw,stepEnd,updateDraw,get USER(){return USER;},handleBuffer:(buf,name)=>{const pf=parseFit(buf);RIDERS=[];PRIMARY=0;COURSE.lapLine=null;COURSE.lapHeading=null;COURSE.lapSplit='auto';state.view=0;addRiderRaw(rawFrom(pf),name);return run();},
+window.CXApp={background:{retry:retryBackground,bounds:backgroundBounds,get status(){return BG.status;}},get COURSE(){return COURSE;},replay:{seek:t=>{if(!RP.ents.length)rpBuild();RP.on=true;RP.t=Math.max(0,Math.min(RP.dur,t));rpUpdate();return rpSnap();},play:()=>rpPlay(true),pause:()=>rpPlay(false),reset:rpReset,snap:rpSnap,get dur(){return RP.dur;},get state(){return {on:RP.on,playing:RP.playing,t:RP.t,speed:RP.speed,whole:RP.whole,n:RP.ents.length};},setWhole:v=>{RP.whole=!!v;RP.t=0;rpBuild();rpUI();}},get LB(){return LB;},run:(...a)=>run(...a),get mapGeom(){return mapGeom;},ED,commitDraw,stepEnd,updateDraw,get USER(){return USER;},handleBuffer:(buf,name)=>{const pf=parseFit(buf);RIDERS=[];PRIMARY=0;COURSE.lapLine=null;COURSE.lapHeading=null;COURSE.lapSplit='auto';state.view=0;addRiderRaw(rawFrom(pf),name);return run();},
   addBuffer:(buf,name)=>{addRiderRaw(rawFrom(parseFit(buf)),name);return run();},
   addRaw:(raw,name)=>{addRiderRaw(raw,name,name);return run();},
   // tests: start a fresh analysis from already-parsed series (same as handleBuffer, without the FIT step)
