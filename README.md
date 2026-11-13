@@ -1,5 +1,7 @@
 # CX-Lap-Tool
 
+**made with claude, I unfortunately haven't done any real coding since undergrad, apologies** 
+
 A single-file, offline web app that takes Garmin `.fit` files from lap races (cyclocross) and builds a lap-by-lap analysis: section and corner time by lap, consistency, fastest sections, power and speed along the lap, a course map with a moving-dot replay, and rider-to-rider (or race-to-race) comparisons with a leaderboard.
 
 **Use it online:** https://chrishtatu.github.io/CX-Lap-Tool/
