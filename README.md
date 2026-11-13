@@ -13,3 +13,6 @@ Everything runs in your browser. `.fit` files you load are never uploaded anywhe
 1. Open the app and drop in a `.fit` file (or tap to choose one).
 2. The race start and finish are found from power; laps from the lap line. Both can be adjusted in Settings.
 3. Add more files ("Add rider") from the same course to compare riders, or the same rider on different days.
+
+## For developers
+How the code is organised, and why it was built the way it was, is in [ARCHITECTURE.md](ARCHITECTURE.md).
