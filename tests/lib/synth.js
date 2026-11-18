@@ -18,7 +18,8 @@
 //   origin      {lat, lon} of the course                           default 40.0, -75.0
 //   skip1       {a, b}: lap 1 cuts straight from position a to b (metres along the lap) - a shortcut start route
 //   loop1       {at, r}: lap 1 rides an extra loop of radius r (m) off the course at position at
-//   startAt     metres along the lap where the race starts (grid past the lap line)
+//   startAt     metres along the lap where the race starts: > 0 the grid is past the lap line, < 0 it is that far before it
+//   finishAt    metres from the lap line where the race finishes: < 0 the finish is that far before the line on the last lap, > 0 past it
 //   tweak       {a, len, bulge}: every lap takes a detour bulge (m) between a and a+len (course changed on another day)
 //   jitter      GPS noise in metres                                default 1.2
 //   noPower     drop the power and cadence channels                default false
@@ -67,8 +68,9 @@ function synthRace(o){
   // one long path of 1 m points: lap after lap, with this race's lap-1 route and course changes spliced in
   const path=[],lapStartIdx=[];
   for(let k=0;k<o.laps;k++){
-    const s0=k===0&&o.startAt?Math.round(o.startAt):0;lapStartIdx.push(path.length);
-    const reg=[];for(let s=s0;s<L;s++)reg.push({...C[s],s,lap:k});
+    const s0=k===0&&o.startAt>0?Math.round(o.startAt):0;lapStartIdx.push(path.length);
+    const reg=[];if(k===0&&o.startAt<0)for(let s=L+Math.round(o.startAt);s<L;s++)reg.push({...C[s],s:s-L,lap:0}); // grid before the line
+    for(let s=s0;s<L;s++)reg.push({...C[s],s,lap:k});
     let seg=reg;
     const splice=(a,b,ins)=>{const ia=seg.findIndex(p=>p.s>=a),ib=seg.findIndex(p=>p.s>=b);seg=seg.slice(0,ia+1).concat(ins,seg.slice(ib));};
     if(o.tweak){const {a,len,bulge}=o.tweak,A=C[a],B=C[a+len],dx=B.x-A.x,dy=B.y-A.y,l=Math.hypot(dx,dy),nx=-dy/l,ny=dx/l,ins=[];
@@ -81,16 +83,20 @@ function synthRace(o){
       splice(o.loop1.at,o.loop1.at+1,ins);}
     seg.forEach(p=>path.push(p));
   }
-  path.push({...C[0],s:0,lap:o.laps});const finishIdx=path.length-1;
+  const fa=Math.round(o.finishAt||0);
+  if(fa<0)path.splice(path.length+fa); // the finish is before the line: the last lap stops short
+  else if(fa>0){lapStartIdx.push(path.length);for(let s=0;s<fa;s++)path.push({...C[s],s,lap:o.laps});} // past the line
+  path.push({...C[fa<0?L+fa:fa],s:fa<0?L+fa:fa,lap:o.laps});const finishIdx=path.length-1;
   // ride it: one sample per second
   const pre=150,post=150,T=[];let pos=0,t=0;
   for(;t<pre;t++)T.push({i:0,v:0,state:'grid'});
-  const lapT=[];let nextLap=1;
+  const lapT=[];let nextLap=1,tFin=null;
   while(pos<finishIdx){
     const i=Math.floor(pos),p=path[i],k=Math.min(o.laps-1,p.lap),f=(o.lapFactors[k]||1)*o.rider*(1+0.025*noise(i));
     const v=Math.max(0.8,p.v*(p.off?1:f));T.push({i:pos,v,state:p.off?'foot':'ride',acc:(path[Math.min(finishIdx,i+8)].v-p.v)});
     const np=pos+v;while(nextLap<=o.laps&&lapStartIdx[nextLap]!==undefined&&np>=lapStartIdx[nextLap]){lapT.push(t+(lapStartIdx[nextLap]-pos)/v);nextLap++;}
     if(np>=finishIdx&&nextLap===o.laps){lapT.push(t+(finishIdx-pos)/v);nextLap++;}
+    if(np>=finishIdx&&tFin==null)tFin=t+(finishIdx-pos)/v;
     pos=np;t++;}
   for(let j=0;j<post;j++)T.push({i:finishIdx,v:j<25?2.5:0,state:j<25?'cool':'stop',drift:j<25?j*2.5:62});
   // series
@@ -106,7 +112,7 @@ function synthRace(o){
     if(!o.noPower){let pw=0,cad=0;if(q.state==='ride'){pw=q.acc>0.3?420:q.acc<-0.6?0:250;pw=Math.round(pw*(1+0.08*Math.sin(j/3)));cad=pw>0?88:0;}else if(q.state==='cool'){pw=60;cad=60;}
       R.pw.push(pw);R.cad.push(cad);}});
   const laps=lapT.map((x,k)=>x-(k?lapT[k-1]:pre));
-  return Object.assign(R,{truth:{start:pre,lapTimes:laps,lapLen:L,runup:COURSE.runupS,finish:pre+lapT[lapT.length-1]}});
+  return Object.assign(R,{truth:{start:pre,lapTimes:laps,lapLen:L,runup:COURSE.runupS,finish:tFin}});
 }
 window.synthRace=synthRace;window.SYNTH_COURSE=COURSE;
 })();

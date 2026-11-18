@@ -11,9 +11,10 @@ back from the page. Cases in tests/local/ use real .fit files from tests/fixture
 committed (rides contain GPS tracks). A local case is skipped when a fixture it needs is missing.
 Its first line names the fixtures it needs:  // fixtures: westhill treehouse
 
-Needs Python 3 and Google Chrome or Chromium. Set CHROME=/path/to/chrome if it isn't found.
+Needs Python 3 and Google Chrome or Chromium (or Puppeteer's chrome-headless-shell, which is preferred when present).
+Set CHROME=/path/to/chrome if it isn't found.
 """
-import base64, glob, html, json, os, re, shutil, subprocess, sys, tempfile
+import base64, glob, html, json, os, pathlib, re, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.join(HERE, '..', 'index.html')
@@ -23,6 +24,11 @@ LIBS = ['harness.js', 'synth.js', 'warp.js']
 def find_chrome():
     if os.environ.get('CHROME'):
         return os.environ['CHROME']
+    # Chrome's separate headless build (installed by Puppeteer) works where a regular Chrome won't run headless (seen with Chrome 157 on Windows)
+    shells = sorted(glob.glob(os.path.join(os.path.expanduser('~'), '.cache', 'puppeteer', 'chrome-headless-shell', '*', '*', 'chrome-headless-shell*')))
+    shells = [p for p in shells if os.path.basename(p) in ('chrome-headless-shell', 'chrome-headless-shell.exe')]
+    if shells:
+        return shells[-1]
     for name in ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'chrome']:
         p = shutil.which(name)
         if p:
@@ -70,9 +76,12 @@ def run_case(chrome, path, verbose):
         page = os.path.join(td, 'test.html')
         open(page, 'w', encoding='utf-8').write(build_page(src, fixtures))
         try:
+            # a throwaway profile so headless Chrome never hands the page to a Chrome window that is already open;
+            # as_uri() makes a valid file:// address on Windows too
             dom = subprocess.run([chrome, '--headless=new', '--no-sandbox', '--disable-gpu', '--window-size=1300,1800',
-                                  '--virtual-time-budget=90000', '--dump-dom', 'file://' + page],
-                                 capture_output=True, text=True, timeout=300).stdout
+                                  '--user-data-dir=' + os.path.join(td, 'profile'), '--no-first-run',
+                                  '--virtual-time-budget=90000', '--dump-dom', pathlib.Path(page).as_uri()],
+                                 capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300).stdout
         except subprocess.TimeoutExpired:
             print(f'FAIL  {name}  (timed out)')
             return 0, 1, 0
@@ -90,6 +99,8 @@ def run_case(chrome, path, verbose):
 
 
 def main():
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(errors='replace')  # check names hold characters (→, ≈) a Windows console code page can't print
     args = [a for a in sys.argv[1:] if not a.startswith('-')]
     verbose = '-v' in sys.argv
     chrome = find_chrome()

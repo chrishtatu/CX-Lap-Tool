@@ -7,6 +7,8 @@ python3 tests/run.py -v         # also list the checks that passed
 ```
 
 Needs Python 3 and Google Chrome or Chromium (set `CHROME=/path/to/chrome` if it isn't found). Nothing to install.
+If Puppeteer's `chrome-headless-shell` is installed (under `~/.cache/puppeteer`), the runner uses it first: on Windows,
+Chrome 157 would not run headless at all.
 
 ## How it works
 Each case is a short JavaScript file. `run.py` puts it, with the helpers in `lib/`, into a copy of `index.html`,
@@ -19,7 +21,7 @@ The run fails (exit code 1) if any check fails.
 and a run-up (off the bike, climbing, wheel stopped), ridden for six laps with a standing start and a cool-down.
 It returns the same data the app gets from a .fit file, plus the truth (real lap times, where the run-up is), so the app's
 answers can be checked against known values. Options make variants: another rider, another day, a changed course,
-a different venue, a shortcut or extra loop on lap 1, a start past the lap line, no power meter.
+a different venue, a shortcut or extra loop on lap 1, a start past or before the lap line, a finish before or past it, no power meter.
 
 | Case | What it checks |
 |---|---|
@@ -32,6 +34,13 @@ a different venue, a shortcut or extra loop on lap 1, a start past the lap line,
 | `07_save_report` | saved HTML holds the app, both riders and the settings |
 | `08_phone_touch` | tap-to-select, pinch zoom, one-finger and mouse pan, Fit |
 | `09_units` | metric labels, unchanged results, replay cursor after unit changes |
+| `12_manual_laps` | Lap splitting "Set by hand": wrong device markers overridden; lap ends typed, removed, added, dragged and clicked; snapping to the lap line; warnings; two riders; kept in saved reports |
+| `13_start_finish_off_line` | finish before the line: estimated full last lap vs truth, banner, tile, CSV; too short to estimate; finish past the line; grid before the line: lap 1 real time, run-in estimate, replay |
+| `14_corner_names_zoom` | corners named after their section; a typed corner name survives moving the lap line and a reload; Ctrl + scroll timeline zoom, Shift + scroll, Reset zoom |
+| `15_save_in_browser` | "Save my sections in this browser": saved and reopened on "Mine" when on, Forget, nothing stored when off but kept through re-runs, saved again when turned back on; a lap line picked with "Move lap line" saved, restored on the next file, forgotten by "Use start position" |
+| `16_section_editor` | S splits where you point; dragging onto or past a boundary merges; picking a section in the list switches to Adjust and zooms to it; arrow keys move its end / start and merge when they pass a boundary |
+| `17_multi_rider_charts` | three riders: rider menu above the charts, a third rider on the Compare charts, switching riders from the chart menu, unticking riders and picking the zero line in the Leaderboard, stacked corner chart (both measures, click to pick) |
+| `18_multi_select` | Ctrl + click several sections: added-up section card (one rider, Compare, Leaderboard), "Selected" row, shading, Clear selection and Esc; side-by-side average corner time with spread lines |
 
 ## Real races (`local/`, not committed)
 Cases in `local/` use your own .fit files from `fixtures/`, which git ignores (rides contain GPS tracks). They are skipped

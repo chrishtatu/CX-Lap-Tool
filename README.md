@@ -9,11 +9,14 @@ A single-file, offline web app that takes Garmin `.fit` files from lap races (cy
 Or download `index.html` and open it in any modern browser. It needs no install and no internet connection.
 
 ## Privacy
-Everything runs in your browser. `.fit` files you load are never uploaded anywhere. A report saved with "Save report as HTML" does contain the ride data (including the GPS track), so think before sharing those publicly.
+Everything runs in your browser. `.fit` files you load are never uploaded anywhere. A report saved with "Save report as HTML" does contain the ride data (including the GPS track), so think before sharing those publicly. The one exception is the optional **Satellite** switch on the course map (off by default): it loads imagery tiles from Esri over the internet, which tells their servers roughly where the course is.
 
 ## Quick start
 1. Open the app and drop in a `.fit` file (or tap to choose one).
 2. The race start and finish are found from power; laps from the lap line. Both can be adjusted in Settings.
+   If the laps are split in the wrong places (for example, the Garmin's lap markers are off), set **Lap splitting** to
+   **Set by hand** and fix the lap ends: type them, or drag them on the timeline. A lap end only needs to be roughly right,
+   because it snaps to the moment you passed the lap line.
 3. Add more files ("Add rider") from the same course to compare riders, or the same rider on different days.
 
 ## For developers

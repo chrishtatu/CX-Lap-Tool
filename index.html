@@ -47,6 +47,22 @@ h3{font-size:13px;margin:12px 0 6px;font-weight:650;color:var(--ink2)}
 .controls label,.lbl{display:inline-flex;gap:6px;align-items:center;color:var(--ink2)}
 select,button,input[type=text],input[type=number]{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--ring);border-radius:6px;padding:4px 8px}
 select,button{cursor:pointer}
+/* the open drop-down list is drawn by the browser: give its options the page's colors, or dark mode shows light text on a gray list */
+option,optgroup{background-color:var(--surface);color:var(--ink)}
+option:disabled{color:var(--muted)}
+/* side panel on wide screens: lap times and a small course map stay in view while you scroll through the rest of the report */
+#dock{position:fixed;top:16px;bottom:16px;width:360px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;z-index:4;pointer-events:none}
+#dock>*{pointer-events:auto}
+#dock .card{margin:0;padding:12px}
+#dock h3{margin:0 0 6px}
+body.docked:not(.printing) .wrap{max-width:var(--mainw);margin-left:var(--side);margin-right:0}
+body.printing #dock{display:none!important}
+.docktab{width:100%;font-size:13px;border-collapse:collapse}
+.docktab td{padding:2px 4px;text-align:right;white-space:nowrap}.docktab td.l{text-align:left}
+.docktab tr.best td{font-weight:700}
+#dockmap{width:100%;display:block;max-height:52vh}
+#dockcap{min-height:1.4em;margin-top:4px}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){color-scheme:dark}}
 button:hover,select:hover{background:var(--wash)}
 button.primary{border-color:var(--ink2);font-weight:600}
 button.on{background:var(--ink);color:var(--surface)}
@@ -149,8 +165,11 @@ svg text{fill:var(--muted);font-size:11px;font-family:inherit}
 .printonly{display:none}
 .trimbox svg{width:100%}
 .trimbox .trimh{cursor:ew-resize}
+.trimbox .laph{cursor:ew-resize}
+.trimbox svg.addlap{cursor:copy}
+#manlaps .lapend{margin:3px 0}
 .trimbox text{font-size:11px}
-.cname{font:inherit;color:var(--ink);background:transparent;border:1px solid transparent;border-radius:4px;padding:1px 4px;width:150px}
+.cname{font:inherit;color:var(--ink);background:transparent;border:1px solid transparent;border-radius:4px;padding:1px 4px;width:230px}
 .cname:hover,.cname:focus{background:var(--surface);border-color:var(--ring)}
 .cname::placeholder{color:var(--muted)}
 body:not(.lbview) .lb-only{display:none!important}
@@ -179,6 +198,7 @@ body.printing .wrap{width:700px;max-width:700px;margin:0;padding:0}
   html,body{background:#fff!important;color:#0b0b0b}
   body{font-size:11px}
   .wrap,body.printing .wrap{width:auto;max-width:none;margin:0;padding:0}
+  body.docked:not(.printing) .wrap{max-width:none;margin:0}
   .topbtns,.controls,#settings,#savepanel,#exportpanel,#dropoverlay,#dropchoice,#filenote,#drop,.tooltip,.hint,#mapbanner,button,.seg,body.editing #detail,.noprint{display:none!important}
   .printonly{display:block}
   .card{box-shadow:none;break-inside:avoid;padding:10px;margin:0 0 10px}
@@ -268,10 +288,17 @@ body.printing .wrap{width:700px;max-width:700px;margin:0;padding:0}
     </div>
     <div class="row-flex" style="margin-top:10px">
       <span class="lbl">Lap splitting:</span>
-      <select id="lapsplit"><option value="auto">Automatic (lap line)</option><option value="device">Use device lap markers</option></select>
+      <select id="lapsplit"><option value="auto">Automatic (lap line)</option><option value="device">Use device lap markers</option><option value="manual">Set by hand</option></select>
       <span class="note" id="splitnote"></span>
     </div>
-    <p class="hint" id="splithint">Device laps (the lap button, or auto-lap) only make sense if the lap was pressed, or auto-lap fired, at the same place on the course every lap. If not, leave this on Automatic.</p>
+    <p class="hint" id="splithint">Device laps (the lap button, or auto-lap) only make sense if the lap was pressed, or auto-lap fired, at the same place on the course every lap. If not, leave this on Automatic, or choose Set by hand.</p>
+    <div id="manlaps" hidden></div>
+    <h3>Saved in this browser</h3>
+    <div class="row-flex">
+      <label class="lbl"><input type="checkbox" id="savebrowser"> Save my sections in this browser</label>
+      <button id="forgetcourse" title="Remove the sections, section marks, corner names and lap line saved in this browser for this course">Forget saved sections for this course</button>
+    </div>
+    <p class="hint" id="savehint"></p>
     <p class="row-flex" style="margin-top:10px"><button class="primary" id="rerun">Re-run analysis</button></p>
   </div>
 
@@ -308,6 +335,8 @@ body.printing .wrap{width:700px;max-width:700px;margin:0;padding:0}
           <label class="lbl" id="maplapwrap">Lap <select id="maplap"></select></label>
           <span class="seg" title="Ctrl + scroll to zoom, drag empty space to pan"><button id="mz-in">+</button><button id="mz-out">−</button><button id="mz-fit">Fit</button></span>
           <span class="note" id="mzinfo"></span>
+          <button id="mappick" class="noprint" title="Click a point on the course you pass exactly once per lap; laps are timed from there">Move lap line</button>
+          <label class="lbl noprint" title="Shows satellite imagery under the course. The imagery is loaded from Esri over the internet, which tells their servers roughly where the course is; everything else stays in this page."><input type="checkbox" id="mapsat"> Satellite</label>
         </div>
         <div id="mapbanner"></div>
         <div id="replaybar" class="noprint"></div>
@@ -329,6 +358,7 @@ body.printing .wrap{width:700px;max-width:700px;margin:0;padding:0}
 
     <div class="card">
       <h2>Time gap along the lap</h2>
+      <div class="row-flex cmp-only noprint chartbar" id="chartbar" style="margin:-2px 0 8px"></div>
       <div class="row-flex single-only" style="margin:-2px 0 6px">
         <label class="lbl">Compare every lap against <select id="base"></select></label>
       </div>
@@ -339,6 +369,7 @@ body.printing .wrap{width:700px;max-width:700px;margin:0;padding:0}
 
     <div class="card">
       <h2 id="spdtitle">Speed (mph)</h2>
+      <div class="row-flex cmp-only noprint chartbar" id="chartbar2" style="margin:-2px 0 8px"></div>
       <svg id="spd"></svg>
       <div id="pwrwrap"><h2 style="margin-top:14px" id="pwrtitle">Power (W, 3-s smoothed)</h2><svg id="pwr"></svg></div>
       <div id="hrctl" class="row-flex noprint" style="margin-top:12px" hidden><label class="lbl"><input type="checkbox" id="showhr"> Show heart rate</label><span class="note">Off by default: wrist and chest straps can read badly, so check that the trace looks believable.</span></div>
@@ -360,7 +391,7 @@ body.printing .wrap{width:700px;max-width:700px;margin:0;padding:0}
 
     <div class="card single-only">
       <h2>Corners, lap by lap</h2>
-      <p class="note" style="margin-top:-4px">Click the grey text next to a corner number to give it a name (for example "Sand pit exit"). Names are saved in this browser for this course, and show up everywhere that corner appears.</p>
+      <p class="note" style="margin-top:-4px">A corner is named after the section it is in until you give it a name of its own: click the grey text next to its number and type one (for example "Sand pit exit"). Names are saved in this browser for this course, are kept if you move the lap line, and show up everywhere that corner appears.</p>
       <div class="row-flex" style="margin-bottom:8px">
         <label class="lbl">Metric <select id="cmetric">
           <option value="vmin">Minimum speed at apex (mph)</option>
@@ -374,6 +405,10 @@ body.printing .wrap{width:700px;max-width:700px;margin:0;padding:0}
     <div class="card single-only" id="offcard" hidden></div>
     <div class="card note" id="method"></div>
   </div>
+  <aside id="dock" class="noprint" hidden>
+    <div class="card" id="docklaps" hidden></div>
+    <div class="card" id="dockmapcard" hidden><h3>Course</h3><svg id="dockmap"></svg><div class="note" id="dockcap"></div></div>
+  </aside>
 </div>
 <div class="tooltip" id="tip"></div>
 <input type="file" id="importfile" accept=".json" hidden>
@@ -540,6 +575,12 @@ function devMarks(R,D,rs,fin){
   if(m.length>=2&&inner.length>=2){const md=median(inner);spread=md>0?(Math.max(...inner)-Math.min(...inner))/md:NaN;}
   return {total:all.length,marks:m,spread,lens:len,innerMin:inner.length?Math.min(...inner):NaN,innerMax:inner.length?Math.max(...inner):NaN};
 }
+// Lap ends the user set by hand (seconds into the file): the ones inside the race window, in order, whole seconds, at least 10 s apart.
+function manMarks(list,rs,fin){
+  const m=[];[...new Set((list||[]).filter(t=>isFinite(t)).map(t=>Math.round(t)))].sort((a,b)=>a-b).forEach(t=>{if(t>rs+10&&t<=fin&&(!m.length||t-m[m.length-1]>=10))m.push(t);});
+  if(!m.length)throw new Error('none of the lap ends you set are inside the race window');
+  return m;
+}
 
 /* =================== analysis =================== */
 // stretches of the reference line a lap skipped (gaps: the lap cut across or started elsewhere) or did not follow (offs: a different course that day)
@@ -552,7 +593,8 @@ function analyze(R,opt){
   // with a manual start, still work out what auto-detection would have chosen (shown in Settings; typing it back clears the override)
   if(!auto&&hasP&&R._auto==null){try{analyze(R,{...opt,startSec:null});}catch(e){}}
   const ds=auto&&hasP?detectStart(R.pw,R.n):null;
-  const nTry=ds?ds.cands.length:1;let first=null,firstErr=null,res=null;
+  // laps set by hand: no retries with later start candidates (a later start would silently drop the user's first lap end)
+  const nTry=ds&&opt.lapSplit!=='manual'?ds.cands.length:1;let first=null,firstErr=null,res=null;
   for(let rank=0;rank<nTry&&!res;rank++){
     let m;try{m=analyzeCore(R,{...opt,startRank:rank});}catch(e){if(!firstErr)firstErr=e;continue;}
     const tt=m.lapSum.slice(1).filter(l=>isFinite(l.time)&&!l.partialEnd&&!l.partial).map(l=>l.time),l0=m.lapSum[0].time;
@@ -583,19 +625,43 @@ function analyzeCore(R,opt){
   let rs=(opt.startSec!=null&&isFinite(opt.startSec))?Math.max(0,Math.min(N-60,Math.round(opt.startSec))):autoStart;
   let fin=(opt.finishSec!=null&&isFinite(opt.finishSec))?Math.round(opt.finishSec):autoFin;
   fin=Math.max(rs+60,Math.min(N-1,fin));
+  // laps set by hand: a last lap end typed a little after the finish moves the finish to it (the race ends where the last lap does)
+  if(opt.lapSplit==='manual'){const la=Math.max(...(opt.manualLaps||[]).filter(t=>isFinite(t)).map(t=>Math.round(t)));if(la>fin&&la<=Math.min(N-1,fin+60))fin=la;}
   const NE=fin+1;
   // lap line
   const dm=devMarks(R,D,rs,fin),useDev=opt.lapSplit==='device'&&dm.marks.length>=2;
-  // with device laps the lap line is wherever the first device marker was pressed (a reference rider's own line is kept for the other riders)
-  const LL=useDev&&!opt.ref?{x:X[dm.marks[0]],y:Y[dm.marks[0]]}:opt.lapLine?{x:(opt.lapLine.lon-lon0)*kx,y:(opt.lapLine.lat-lat0)*ky}:{x:X[rs],y:Y[rs]};
+  // lap ends set by hand replace both the lap line crossings and the device markers
+  const mm=opt.lapSplit==='manual'?manMarks(opt.manualLaps,rs,fin):null,useMan=!!mm;
+  let mk=useMan?mm:useDev?dm.marks:null;
+  // device laps: the lap line is wherever the first device marker was pressed (a reference rider's own line is kept for the other riders).
+  // Lap ends set by hand keep the same lap line as automatic splitting: the race start position, or a point picked on the map.
+  const LL=useDev&&!opt.ref?{x:X[mk[0]],y:Y[mk[0]]}:opt.lapLine?{x:(opt.lapLine.lon-lon0)*kx,y:(opt.lapLine.lat-lat0)*ky}:{x:X[rs],y:Y[rs]};
   const dd=i=>Math.hypot(X[i]-LL.x,Y[i]-LL.y);
   const startOnLine=dd(rs)<(opt.ref?60:20);
   let hstart=null,href=null;
   if(!opt.lapLine){for(let j=rs+1;j<N;j++){if(Math.hypot(X[j]-X[rs],Y[j]-Y[rs])>12){hstart=Math.atan2(Y[j]-Y[rs],X[j]-X[rs]);break;}}}
+  // A hand-set lap end only has to be roughly right. Lap times are measured where the rider passes the lap line, so each lap end snaps to the
+  // closest pass of the line within 30 m, in a window around it, in the race direction (the course reference's, or leaving the start, or else
+  // the direction of the first lap end's pass). One with no pass nearby is used as typed and flagged.
+  let manInfo=null;
+  if(useMan){
+    const hd=j=>{const a=Math.max(0,j-3),b=Math.min(N-1,j+3);return Math.atan2(Y[b]-Y[a],X[b]-X[a]);};
+    let h0=opt.lapHeading!=null?opt.lapHeading:hstart;
+    const dur=[];for(let k=1;k<mm.length;k++)dur.push(mm[k]-mm[k-1]);
+    const W=Math.round(Math.max(15,Math.min(90,0.4*(dur.length?median(dur):mm[0]-rs))));
+    const pairs=mm.map(t=>{let b=-1,bd=1e9;for(let j=Math.max(rs+11,t-W);j<=Math.min(NE-1,t+W);j++){const d=dd(j);if(d<bd&&(h0==null||angdiff(hd(j),h0)<Math.PI/3)){bd=d;b=j;}}
+      if(b>=0&&bd<30){if(h0==null)h0=hd(b);return {asked:t,used:b,near:true};}return {asked:t,used:t,near:false};});
+    mk=[];[...new Set(pairs.map(p=>p.used))].sort((a,b)=>a-b).forEach(t=>{if(!mk.length||t-mk[mk.length-1]>=10)mk.push(t);});
+    pairs.forEach(p=>{p.lap=mk.indexOf(p.used);});
+    manInfo={pairs,W};
+  }
   let B,estLap;
-  if(useDev){ // laps are cut at the device's own lap markers inside the race window
-    B=[rs,...dm.marks.map(t=>Math.min(t,NE-1))];const sp=[];for(let k=1;k+1<B.length;k++)sp.push(D[B[k+1]]-D[B[k]]);
-    estLap=median(sp);if(!(estLap>10))throw new Error("The device lap markers in this file don't give laps of a usable length.");
+  if(mk){ // laps are cut at the device's own lap markers, or at the lap ends set by hand, inside the race window
+    B=[rs,...mk.map(t=>Math.min(t,NE-1))];const sp=[];for(let k=1;k+1<B.length;k++)sp.push(D[B[k+1]]-D[B[k]]);
+    estLap=sp.length?median(sp):D[B[1]]-D[B[0]];
+    if(!(estLap>10))throw new Error(useMan?"the lap ends you set don't give laps of a usable length":"The device lap markers in this file don't give laps of a usable length.");
+    // hand-set laps that hold about two laps (a lap end missing) or clearly less than one (an extra lap end); lap 1 may be short (start past the line)
+    if(useMan){manInfo.long=[];manInfo.short=[];for(let k=0;k+1<B.length;k++){const l=(D[B[k+1]]-D[B[k]])/estLap;if(l>1.6)manInfo.long.push({k,n:Math.round(l)});else if(k>0&&l<0.6)manInfo.short.push(k);}}
   } else {
   const thr=20; let cands=[];
   for(let i=rs;i<NE;){
@@ -625,13 +691,16 @@ function analyzeCore(R,opt){
   B=[rs];
   while(true){
     const last=B[B.length-1];const first=B.length===1;
-    const lo=D[last]+(first?0.7:0.85)*estLap, hi=D[last]+(first?1.25:1.15)*estLap;
+    // lap 1 can be anything from 0.3 laps (a lap line picked partway round the course, ahead of the start) to 1.3 (a full lap plus a run-in from a
+    // grid before the line); among the passes in that range the one nearest a full lap wins, so a pass of the line area mid-lap doesn't cut lap 1 short
+    const lo=D[last]+(first?0.3:0.85)*estLap, hi=D[last]+(first?1.3:1.15)*estLap;
     let opts=pts.filter(i=>i>last&&D[i]>=lo&&D[i]<=hi);
     let pick=null;
     const score=i=>dd(i)/8+Math.abs(D[i]-D[last]-estLap)/(0.04*estLap);
     if(opts.length) pick=opts.sort((a,b)=>score(a)-score(b))[0];
-    else { // fallback: closest approach in window
-      let bj=-1,bd=1e9;for(let j=last+1;j<NE;j++){if(D[j]<lo)continue;if(D[j]>hi)break;const d=dd(j);if(d<bd){bd=d;bj=j;}}
+    else { // fallback: closest approach in window (for lap 1, the usual 0.7-1.25 laps)
+      const flo=first?D[last]+0.7*estLap:lo,fhi=first?D[last]+1.25*estLap:hi;
+      let bj=-1,bd=1e9;for(let j=last+1;j<NE;j++){if(D[j]<flo)continue;if(D[j]>fhi)break;const d=dd(j);if(d<bd){bd=d;bj=j;}}
       if(bj>0&&bd<30) pick=bj;
     }
     if(pick==null) break; B.push(pick);
@@ -640,10 +709,17 @@ function analyzeCore(R,opt){
   let partialEnd=false;
   {const last=B[B.length-1];if(NE-1-last>30&&D[NE-1]-D[last]>=0.5*estLap){B.push(NE-1);partialEnd=true;}}
   const nl=B.length-1;
+  if(useMan&&(nl-(partialEnd?1:0)<1||nl<2)) throw new Error(`the lap ends you set give only ${nl} lap${nl===1?'':'s'} between the race start and finish`);
   if(nl-(partialEnd?1:0)<1||nl<2) throw new Error(`Only found ${nl} lap${nl===1?'':'s'}. Try setting the lap line in Settings (pick a spot on the course you pass once per lap).`);
+  // The grid a turn or two before the lap line: the rider passes the line soon after the start, and lap 1 runs on to the pass after that (a full lap
+  // plus the run-in). Lap 1's positions are then mapped from that first pass like any other lap, and its estimate takes the run-in off.
+  let lead=null;
+  if(!startOnLine){const hdAt=j=>{const a=Math.max(0,j-3),b=Math.min(N-1,j+3);return Math.atan2(Y[b]-Y[a],X[b]-X[a]);},hb=hdAt(B[1]);let bd=20;
+    for(let i=rs+1;i<B[1]&&D[i]-D[rs]<=0.3*estLap;i++){const d=dd(i);if(d<bd&&angdiff(hdAt(i),hb)<Math.PI/3){bd=d;lead=i;}}
+    if(lead!=null&&D[B[1]]-D[lead]<0.8*estLap)lead=null;}
   const rough=[];for(let k=0;k<nl;k++)rough.push(partialEnd&&k===nl-1?Infinity:B[k+1]-B[k]);
   let ref=-1;
-  if(useDev){ // device laps vary in length: the reference is the fastest of the laps that are close to a full lap
+  if(mk){ // device laps (and hand-set laps) vary in length: the reference is the fastest of the laps that are close to a full lap
     const ck=[];for(let k=1;k<nl;k++)if(isFinite(rough[k]))ck.push(k);const md=median(ck.map(k=>rough[k]));
     ck.filter(k=>rough[k]>=0.85*md).forEach(k=>{if(ref<0||rough[k]<rough[ref])ref=k;});
   } else for(let k=1;k<nl;k++)if(isFinite(rough[k])&&(ref<0||rough[k]<rough[ref]))ref=k;
@@ -674,7 +750,7 @@ function analyzeCore(R,opt){
   const T=i=>i;
   function gpsMap(k){
     const pe=partialEnd&&k===nl-1;
-    const a=B[k],b=B[k+1],i0=k===0?rs:Math.max(a-4,rs),i1=pe?NE-1:Math.min(b+4,N-1);
+    const a=B[k],b=B[k+1],i0=k===0?(lead!=null?Math.max(rs,lead-4):rs):Math.max(a-4,rs),i1=pe?NE-1:Math.min(b+4,N-1);
     const idx=[],s=[],dv=[];let sp=null;
     // a long jump forward is only trusted when the next ~10 s keep following the course from there at about the rider's own pace
     // (crossing another lane of a tight course for a moment, on a detour or a shortcut, must not move the position onto that lane)
@@ -682,7 +758,7 @@ function analyzeCore(R,opt){
       return n>=4&&ok>=0.7*n&&q-s2>=0.4*(D[je]-D[i])-5;}
     for(let i=i0;i<=i1;i++){
       let lo,hi;
-      if(sp===null){if(k===0&&!startOnLine){lo=-ext;hi=Lref+ext;}else{lo=-ext;hi=opt.ref?70:30;}}else{lo=sp-3;hi=sp+28;}
+      if(sp===null){if(k===0&&!startOnLine&&lead==null){lo=-ext;hi=Lref+ext;}else{lo=-ext;hi=opt.ref?70:30;}}else{lo=sp-3;hi=sp+28;}
       let r=project(X[i],Y[i],lo,hi);
       if(sp!==null&&r.d>20){const r2=project(X[i],Y[i],sp-3,Lref+ext);if(r2.d<12&&r2.d<r.d*0.5&&(r2.s-sp<60||follows(i,r2.s)))r=r2;}
       let v=r.s;if(sp!==null&&v<sp)v=sp;sp=v;idx.push(i);s.push(v);dv.push(r.d);
@@ -728,7 +804,7 @@ function analyzeCore(R,opt){
     gps[0].dev=gps[0].dev.filter(([a,b])=>!csp.some(([c,d])=>Math.min(b,d)-Math.max(a,c)>0.5*(b-a)));
     if(courseCov<0.6)throw new Error(`Only about ${Math.round(courseCov*100)}% of this file's laps follow the reference course (at least 60% is needed to compare), so it doesn't look like the same course.`);
   }
-  const lap0Partial=!startOnLine||gps[0].s[0]>20;
+  const lap0Partial=lead==null&&(!startOnLine||gps[0].s[0]>20);
   // ref wheel distance by position
   const tgR=gps[ref].tg; let RW=tgR.map(t=>valAt(D,t)-valAt(D,tgR[0]));
   RW=cummax(RW).map((v,g)=>v+g*1e-6);
@@ -744,8 +820,8 @@ function analyzeCore(R,opt){
     for(let j=0;j<idx.length;j++){if(d[j]<3.5&&s[j]>=0&&s[j]<=Lref&&clean[gi(s[j])]&&s[j]-last>=40){anc.push(j);last=s[j];}}
     let aS=anc.map(j=>s[j]),aW=anc.map(j=>D[idx[j]]);
     const s0=k===0?(!lap0Partial?Math.min(s[0],0):s[0]):0;
-    if(m.pe){aS=[s0,...aS.filter(v=>v<m.slast-1),m.slast];aW=[k===0?D[rs]:valAt(D,m.tstart),...aW.slice(0,aS.length-2),D[NE-1]];}
-    else{aS=[s0,...aS,Lref];aW=[k===0?D[rs]:valAt(D,m.tstart),...aW,valAt(D,m.tend)];}
+    if(m.pe){aS=[s0,...aS.filter(v=>v<m.slast-1),m.slast];aW=[k===0?D[idx[0]]:valAt(D,m.tstart),...aW.slice(0,aS.length-2),D[NE-1]];}
+    else{aS=[s0,...aS,Lref];aW=[k===0?D[idx[0]]:valAt(D,m.tstart),...aW,valAt(D,m.tend)];}
     const fS=[aS[0]],fW=[aW[0]];
     for(let j=1;j<aS.length;j++){if(aS[j]>fS[fS.length-1]+1&&aW[j]>fW[fW.length-1]+0.5){fS.push(aS[j]);fW.push(aW[j]);}else if(j===aS.length-1){fS[fS.length-1]=aS[j];fW[fW.length-1]=Math.max(aW[j],fW[fW.length-1]-0.4);}}
     const aR=fS.map(v=>v<0?v:interp1(v,G,RW));
@@ -804,7 +880,16 @@ function analyzeCore(R,opt){
       mg.filter(x=>!x.drop).forEach(x=>parts.push(x));
       parts.forEach(p=>{if(p.kind==='start')return;p.act=at(L0.tgRaw,p.b,true)-at(L0.tgRaw,p.a,false);p.est=med(p.a,p.b);});
       const ok=parts.filter(p=>isFinite(p.act)&&isFinite(p.est)&&p.act>=0);
+      // a run-in before the lap line: lap 1 is a full lap plus the run-in, so the estimate is lap 1 from its first pass of the line
+      if(lead!=null){const tc=at(L0.tgRaw,0,true);if(isFinite(tc)&&tc>rs)ok.unshift({kind:'lead',a:0,b:0,act:tc-rs,est:0,len:D[lead]-D[rs]});}
       if(ok.length){L0.diff=ok;L0.adj=L0.time-ok.reduce((t,p)=>t+p.act,0)+ok.reduce((t,p)=>t+p.est,0);}}}
+  // The finish a turn or two before the lap line: the last lap stops short of a full lap. It keeps its real time to the finish, and for comparisons it
+  // gets an estimated full-lap time: that plus the median time of the full laps from the finish position to the lap line.
+  // (A finish past the line needs nothing: the last lap is timed where it passes the line, and the rest isn't a lap.)
+  {const k=nl-1,L=out[k];
+    if(L.partialEnd&&L.slast>=0.7*Lref&&L.slast<Lref){
+      const fk=useK.filter(j=>j>0&&j!==k&&isFinite(out[j].time)),dt=fk.map(j=>out[j].tg[NG-1]-interp1(L.slast,G,out[j].tg)).filter(isFinite),est=dt.length?median(dt):NaN;
+      if(isFinite(est)&&est>=0){L.time=L.lastT-L.tstart;L.toFinish=false;L.adj=L.time+est;L.diff=[{kind:'finish',a:L.slast,b:Lref,act:0,est}];}}}
   const tgRef=out[ref].tg;
   let ftG=tgRef.map(t=>(valAt(D,t)-valAt(D,tgRef[0]))*FTM);
   if(offAny&&opt.ref&&opt.ref.ftG)ftG=opt.ref.ftG; // the course differs, so feet along the lap are the reference's
@@ -849,7 +934,7 @@ function analyzeCore(R,opt){
     return {lap:k+1,time:L.time,toFinish:L.toFinish,pw:Math.round(mean(ps)),np:Math.round(np),pmax:Math.max(...ps),coast:Math.round(ps.filter(v=>v===0).length/ps.length*100),
       v:dist/1609.34/((t1-t0)/3600),cad:cads.length?Math.round(mean(cads)):0,hr:hrs.length?Math.round(mean(hrs)):null,hrmax:hrs.length?Math.max(...hrs):null,partial:L.partial,partialEnd:L.partialEnd,shortcut:L.gaps.length>0||(L.dev||[]).length>0,adj:isFinite(L.adj)?L.adj:null,diff:L.diff||null};});
   const toLL=(x,y)=>({lat:y/ky+lat0,lon:x/kx+lon0});
-  return {N,X,Y,D,V,P,C,A,hasPower,hasCad,H:HH,hasHR,dev:{...dm,used:useDev,wanted:opt.lapSplit==='device',nTotal:dm.total},rs,autoStart,LL,lapLineLL:toLL(LL.x,LL.y),startOnLine,fin,autoFin,B,nl,ref,G,NG,gx,gy,Lref,STEP,laps:out,ftG,altG,
+  return {N,X,Y,D,V,P,C,A,hasPower,hasCad,H:HH,hasHR,dev:{...dm,used:useDev,wanted:opt.lapSplit==='device',nTotal:dm.total},man:{used:useMan,marks:useMan?mk:[],...(manInfo||{})},rs,autoStart,LL,lapLineLL:toLL(LL.x,LL.y),startOnLine,fin,autoFin,B,nl,ref,G,NG,gx,gy,Lref,STEP,laps:out,ftG,altG,
     turn,turnAbs,corners,zones,eruns,lapSum,toLL,kx,ky,lat0,lon0,trailing:NE-1-B[nl],courseCov,offAny,
     tgAt,vAt,meanP,partialEnd,estLap,lapHeading:Math.atan2(gy[3]-gy[0],gx[3]-gx[0])};
 }
@@ -972,7 +1057,11 @@ function currentSet(){return state.secMode==='user'?USER:AUTO;}
 const LSKEY='cxLapAnalyzer.sections.v1';
 function lsGet(){try{return JSON.parse(localStorage.getItem(LSKEY)||'[]');}catch(e){return [];}}
 function lsSet(v){try{localStorage.setItem(LSKEY,JSON.stringify(v));return true;}catch(e){return false;}}
-function courseMatch(rec){const d=Math.hypot((rec.lat-M.lapLineLL.lat)*M.ky,(rec.lon-M.lapLineLL.lon)*M.kx);return d<200&&Math.abs(rec.lapFt-M.ftG[M.NG-1])/rec.lapFt<0.15;}
+function courseMatch(rec){const d=Math.hypot((rec.lat-M.lapLineLL.lat)*M.ky,(rec.lon-M.lapLineLL.lon)*M.kx);return (d<200||llS(M,rec.lat,rec.lon)!=null)&&Math.abs(rec.lapFt-M.ftG[M.NG-1])/rec.lapFt<0.15;}
+// position along Mr's lap (m) of the closest point of the course line to a lat/lon, if it is within 30 m
+function llS(Mr,lat,lon){const x=(lon-Mr.lon0)*Mr.kx,y=(lat-Mr.lat0)*Mr.ky;let b=null,bd=30;for(let g=0;g<Mr.NG;g++){const d=Math.hypot(Mr.gx[g]-x,Mr.gy[g]-y);if(d<bd){bd=d;b=Mr.G[g];}}return b;}
+// a stored position along the lap was measured from the lap line in use then (ll); if the lap line has moved since, shift by where that old line is on this lap
+function lineShift(Mr,ll){if(!ll)return 0;const d=Math.hypot((ll.lat-Mr.lapLineLL.lat)*Mr.ky,(ll.lon-Mr.lapLineLL.lon)*Mr.kx);if(d<10)return 0;const s=llS(Mr,ll.lat,ll.lon);return s==null?0:s;}
 function userToStore(withCorners){return {...(withCorners?{corners:CN.map(e=>({...e})),marks:ST.map(e=>({...e}))}:{}),lat:M.lapLineLL.lat,lon:M.lapLineLL.lon,lapFt:M.ftG[M.NG-1],saved:new Date().toISOString(),
   cuts:USER.cuts.map(s=>{const g=Math.round(s/M.STEP);const ll=M.toLL(M.gx[Math.min(g,M.NG-1)],M.gy[Math.min(g,M.NG-1)]);return {lat:ll.lat,lon:ll.lon,frac:s/M.Lref};}),names:USER.names.slice()};}
 function storeToUser(rec){
@@ -986,16 +1075,16 @@ const CNKEY='cxLapAnalyzer.cornerNames.v1';
 let CN=[]; // [{lat,lon,frac,name}]
 function cnGet(){try{return JSON.parse(localStorage.getItem(CNKEY)||'[]');}catch(e){return [];}}
 function cnSet(v){try{localStorage.setItem(CNKEY,JSON.stringify(v));return true;}catch(e){return false;}}
-function saveCornerNames(){const all=cnGet().filter(r=>!courseMatch(r));if(CN.length)all.push({lat:M.lapLineLL.lat,lon:M.lapLineLL.lon,lapFt:M.ftG[M.NG-1],saved:new Date().toISOString(),names:CN.map(e=>({...e}))});cnSet(all);}
+function saveCornerNames(){if(!SAVE_ON)return;const all=cnGet().filter(r=>!courseMatch(r));if(CN.length)all.push({lat:M.lapLineLL.lat,lon:M.lapLineLL.lon,lapFt:M.ftG[M.NG-1],saved:new Date().toISOString(),names:CN.map(e=>({...e}))});cnSet(all);}
 // index of the corner of Mr that a stored name belongs to (within ~25 m and ~40 m along the lap), or -1
-function entryCorner(Mr,e){const ex=(e.lon-Mr.lon0)*Mr.kx,ey=(e.lat-Mr.lat0)*Mr.ky;let best=-1,bd=1e9;
-  Mr.corners.forEach((c,j)=>{const ds=Math.abs(c.s-e.frac*Mr.Lref),d=Math.hypot(interp1(c.s,Mr.G,Mr.gx)-ex,interp1(c.s,Mr.G,Mr.gy)-ey);if(ds<40&&d<25&&d+0.3*ds<bd){bd=d+0.3*ds;best=j;}});return best;}
+function entryCorner(Mr,e){const ex=(e.lon-Mr.lon0)*Mr.kx,ey=(e.lat-Mr.lat0)*Mr.ky,L=Mr.Lref,es=(((e.frac*L+lineShift(Mr,e.ll))%L)+L)%L;let best=-1,bd=1e9;
+  Mr.corners.forEach((c,j)=>{const a=Math.abs(c.s-es),ds=Math.min(a,L-a),d=Math.hypot(interp1(c.s,Mr.G,Mr.gx)-ex,interp1(c.s,Mr.G,Mr.gy)-ey);if(ds<40&&d<25&&d+0.3*ds<bd){bd=d+0.3*ds;best=j;}});return best;}
 function applyCornerNames(){RIDERS.forEach(r=>{if(!r.M)return;r.M.corners.forEach(c=>{c.cname='';});CN.forEach(e=>{const j=entryCorner(r.M,e);if(j>=0)r.M.corners[j].cname=e.name;});});}
-function loadCornerNames(pre){const rec=cnGet().find(courseMatch);
-  CN=(rec?rec.names:(Array.isArray(pre)&&pre.length?pre:CN.filter(e=>entryCorner(M,e)>=0))).filter(e=>e&&e.name&&isFinite(e.lat)&&isFinite(e.lon)).map(e=>({lat:e.lat,lon:e.lon,frac:e.frac,name:String(e.name)}));applyCornerNames();}
+function loadCornerNames(pre){const rec=SAVE_ON?cnGet().find(courseMatch):null,ll0=rec?{lat:rec.lat,lon:rec.lon}:null;
+  CN=(rec?rec.names:(Array.isArray(pre)&&pre.length?pre:CN.filter(e=>entryCorner(M,e)>=0))).filter(e=>e&&e.name&&isFinite(e.lat)&&isFinite(e.lon)).map(e=>({lat:e.lat,lon:e.lon,frac:e.frac,name:String(e.name),ll:e.ll&&isFinite(e.ll.lat)?{lat:e.ll.lat,lon:e.ll.lon}:ll0}));applyCornerNames();}
 function setCornerName(j,name){name=String(name||'').trim();const c=M.corners[j];if(!c)return;
   const ll=M.toLL(interp1(c.s,M.G,M.gx),interp1(c.s,M.G,M.gy));
-  CN=CN.filter(e=>entryCorner(M,e)!==j);if(name)CN.push({lat:ll.lat,lon:ll.lon,frac:c.s/M.Lref,name});
+  CN=CN.filter(e=>entryCorner(M,e)!==j);if(name)CN.push({lat:ll.lat,lon:ll.lon,frac:c.s/M.Lref,name,ll:{lat:M.lapLineLL.lat,lon:M.lapLineLL.lon}});
   applyCornerNames();saveCornerNames();}
 function clearCornerNames(){CN=[];applyCornerNames();saveCornerNames();renderAll();}
 /* ---- section marks (barriers / run-up): stored per course like corner names, as a point in the middle of the marked section.
@@ -1004,12 +1093,12 @@ const STKEY='cxLapAnalyzer.secMarks.v1',MARK_TYPES={barriers:'Barriers','runup':
 let ST=[]; // [{lat,lon,frac,type}]
 let MARKS=[]; // [{s,type}] on the reference course
 function stGet(){try{return JSON.parse(localStorage.getItem(STKEY)||'[]');}catch(e){return [];}}
-function saveMarks(){const all=stGet().filter(r=>!courseMatch(r));if(ST.length)all.push({lat:M.lapLineLL.lat,lon:M.lapLineLL.lon,lapFt:M.ftG[M.NG-1],saved:new Date().toISOString(),marks:ST.map(e=>({...e}))});try{localStorage.setItem(STKEY,JSON.stringify(all));}catch(e){}}
+function saveMarks(){if(!SAVE_ON)return;const all=stGet().filter(r=>!courseMatch(r));if(ST.length)all.push({lat:M.lapLineLL.lat,lon:M.lapLineLL.lon,lapFt:M.ftG[M.NG-1],saved:new Date().toISOString(),marks:ST.map(e=>({...e}))});try{localStorage.setItem(STKEY,JSON.stringify(all));}catch(e){}}
 function markS(Mr,e){const ex=(e.lon-Mr.lon0)*Mr.kx,ey=(e.lat-Mr.lat0)*Mr.ky;let best=null,bs=1e9;
   for(let g=0;g<Mr.NG;g++){const d=Math.hypot(Mr.gx[g]-ex,Mr.gy[g]-ey);if(d<30){const sc=d+Math.abs(Mr.G[g]-e.frac*Mr.Lref)*0.3;if(sc<bs){bs=sc;best=Mr.G[g];}}}return best;}
 function applyMarks(){const R=RIDERS[PRIMARY];MARKS=R&&R.M?ST.map(e=>({s:markS(R.M,e),type:e.type})).filter(m=>m.s!=null&&MARK_TYPES[m.type]):[];}
 const cleanMarks=a=>(Array.isArray(a)?a:[]).filter(e=>e&&MARK_TYPES[e.type]&&isFinite(e.lat)&&isFinite(e.lon)).map(e=>({lat:e.lat,lon:e.lon,frac:e.frac,type:e.type}));
-function loadMarks(pre){const rec=stGet().find(courseMatch);ST=cleanMarks(rec?rec.marks:(Array.isArray(pre)&&pre.length?pre:ST));applyMarks();}
+function loadMarks(pre){const rec=SAVE_ON?stGet().find(courseMatch):null;ST=cleanMarks(rec?rec.marks:(Array.isArray(pre)&&pre.length?pre:ST));applyMarks();}
 const markAt=(s0,s1)=>{const m=MARKS.filter(x=>x.s>=s0&&x.s<s1);return m.length?m[m.length-1].type:null;};
 // mark (or unmark: type null) section i of the current set
 function setMark(i,type){const s=S[i];if(!s)return;
@@ -1021,11 +1110,34 @@ const AUTO_NAME=/^(From the line: )?(run-up \(off the bike\)|off-bike section|cl
 function markedName(name,type,i){const lab=MARK_TYPES[type];if(!lab)return name;
   if(!name||AUTO_NAME.test(name))return i===0?'From the line: '+lab.toLowerCase():lab;return `${name} (${lab.toLowerCase()})`;}
 const markSel=(i,type,id)=>`<select ${id?`id="${id}"`:''} data-mk="${i}" aria-label="Mark section S${i+1}"><option value=""${type?'':' selected'}>—</option>${Object.entries(MARK_TYPES).map(([k,v])=>`<option value="${k}"${type===k?' selected':''}>${v}</option>`).join('')}</select>`;
-const cTitle=c=>`C${c.id}`+(c.cname?' · '+esc(c.cname):'');
-const cText=c=>`C${c.id}`+(c.cname?' · '+c.cname:'');
-function saveUser(){const all=lsGet().filter(r=>!courseMatch(r));all.push(userToStore());lsSet(all);}
+// a corner you haven't named is called after the section it is in ("2nd descent, right hairpin"), numbered when the section has several
+const cKind=c=>`${c.dir==='L'||c.dir==='left'?'left':'right'} ${c.kind}`;
+function cAuto(c){const s=S[c.sec-1];if(!s)return cKind(c);const same=CR.filter(q=>q.sec===c.sec),k=same.findIndex(q=>q.id===c.id);
+  const sn=String(s.name||'').replace(/^From the line: /,'').replace(/\s*\([^)]*\)\s*$/,'');return `${sn?sn.charAt(0).toUpperCase()+sn.slice(1)+', ':''}${cKind(c)}${same.length>1&&k>=0?` (${k+1} of ${same.length})`:''}`;}
+const cName=c=>c.cname||cAuto(c);
+// the corner type after its name, only when it has a name of its own (an automatic name already says it)
+const cKindTag=c=>c.cname?`<span class="dim">${cKind(c)}</span>`:'';
+const cTitle=c=>`C${c.id} · ${esc(cName(c))}`;
+const cText=c=>`C${c.id} · ${cName(c)}`;
+const cSec=c=>S[c.sec-1]?`S${c.sec} ${S[c.sec-1].name}`:`S${c.sec}`;
+// "Save my sections in this browser" (Settings, on by default): your sections, section marks and corner names for each course are kept in this
+// browser's storage and come back when you load a file from the same course. Off: nothing is written there or read back, and your sections only
+// last until the page is closed (MEMREC keeps them across re-runs meanwhile); use Export or "Save report as HTML" to keep them.
+const SAVEKEY='cxLapAnalyzer.saveInBrowser';let SAVE_ON=true,MEMREC=null,FRESH=false;
+try{SAVE_ON=localStorage.getItem(SAVEKEY)!=='0';}catch(e){}
+function saveUser(){MEMREC=userToStore();if(!SAVE_ON)return;const all=lsGet().filter(r=>!courseMatch(r));all.push(MEMREC);lsSet(all);}
+// a lap line picked on the map is kept too (with the same setting): the point itself, matched to a course by lying on its line and by lap length
+const LLKEY='cxLapAnalyzer.lapLine.v1';
+function llGet(){try{return JSON.parse(localStorage.getItem(LLKEY)||'[]');}catch(e){return [];}}
+function llSet(v){try{localStorage.setItem(LLKEY,JSON.stringify(v));}catch(e){}}
+const llMatch=(Mr,rec)=>!!rec&&isFinite(rec.lat)&&llS(Mr,rec.lat,rec.lon)!=null&&Math.abs(rec.lapFt-Mr.ftG[Mr.NG-1])/rec.lapFt<0.15;
+function savedLine(Mr){return SAVE_ON?llGet().find(r=>llMatch(Mr,r))||null:null;}
+function saveLapLine(){if(!SAVE_ON||!M||!COURSE.lapLine)return;const all=llGet().filter(r=>!llMatch(M,r));all.push({lat:COURSE.lapLine.lat,lon:COURSE.lapLine.lon,heading:COURSE.lapHeading,lapFt:M.ftG[M.NG-1],saved:new Date().toISOString()});llSet(all);}
+function forgetLapLine(){if(M)llSet(llGet().filter(r=>!llMatch(M,r)));}
+// remove everything saved in this browser for the current course
+function forgetCourse(){forgetLapLine();lsSet(lsGet().filter(r=>!courseMatch(r)));cnSet(cnGet().filter(r=>!courseMatch(r)));try{localStorage.setItem(STKEY,JSON.stringify(stGet().filter(r=>!courseMatch(r))));}catch(e){}}
 function loadUser(preloaded){
-  const rec=lsGet().find(courseMatch)||(preloaded||null);
+  const rec=(SAVE_ON?lsGet().find(courseMatch):MEMREC&&courseMatch(MEMREC)?MEMREC:null)||(preloaded||null);
   USER=rec?storeToUser(rec):{cuts:AUTO.cuts.slice(),names:AUTO.names.slice()};
   return !!rec;
 }
@@ -1035,10 +1147,10 @@ function riderName(file,n){
   let st=(file||'').replace(/\.fit$/i,'').replace(/[_]+/g,' ').replace(/\b\d{6,}\b/g,'').replace(/\bACTIVITY\b/i,'').trim();
   let nm=st||`Rider ${n}`;let k=2;while(RIDERS.some(r=>r.name===nm))nm=(st||'Rider')+' '+(k++);return nm;
 }
-function addRiderRaw(raw,file,name){RIDERS.push({name:name||riderName(file,RIDERS.length+1),file,RAW:raw,opt:{startSec:null,finishSec:null},M:null,err:null,sysLb:null});}
+function addRiderRaw(raw,file,name){RIDERS.push({name:name||riderName(file,RIDERS.length+1),file,RAW:raw,opt:{startSec:null,finishSec:null,laps:null},M:null,err:null,sysLb:null});}
 async function handleFiles(files,append){
   $('err').textContent='';
-  if(!append){RIDERS=[];PRIMARY=0;COURSE.lapLine=null;COURSE.lapHeading=null;COURSE.lapSplit='auto';state.secMode='auto';state.view=0;}
+  if(!append){RIDERS=[];PRIMARY=0;COURSE.lapLine=null;COURSE.lapHeading=null;COURSE.lapSplit='auto';state.secMode='auto';state.view=0;FRESH=true;}
   const errs=[];
   for(const f of files){
     try{const pf=parseFit(await f.arrayBuffer());if(!pf.recs.length)throw new Error('No ride data found.');addRiderRaw(rawFrom(pf),f.name);}
@@ -1080,8 +1192,11 @@ function courseMismatch(raw,M0,refName){
     return `This file isn't from the same course as ${refName} (its track doesn't follow the same course line).`;
   }catch(e){return null;}
 }
-// laps are split at the lap line, or (if chosen) at the device's own lap markers; if that can't be analysed the lap line is used and the reason is kept
+// laps are split at the lap line, or (if chosen) at the device's own lap markers or at lap ends the user set by hand; if that can't be analysed the lap line is used and the reason is kept
 function analyzeRider(r,o){
+  if(COURSE.lapSplit==='manual'&&r.opt.laps&&r.opt.laps.length){
+    try{return analyze(r.RAW,{...o,lapSplit:'manual',manualLaps:r.opt.laps});}
+    catch(e){const m=analyze(r.RAW,{...o,lapSplit:'auto'});m.manFail=e.message||String(e);return m;}}
   if(COURSE.lapSplit!=='device')return analyze(r.RAW,{...o,lapSplit:'auto'});
   try{return analyze(r.RAW,{...o,lapSplit:'device'});}
   catch(e){const m=analyze(r.RAW,{...o,lapSplit:'auto'});m.devFail=e.message||String(e);return m;}
@@ -1112,12 +1227,20 @@ function activate(i){
 function run(preloadSecs){
   rpReset();
   if(!analyzeAll()){const e=RIDERS.map(r=>r.err).filter(Boolean);$('err').textContent=e[0]||'Could not analyze these files.';M=null;showDrop(true);return false;}
+  // a newly loaded file from a course you picked a lap line for gets that lap line back
+  let lineBack=false;
+  if(FRESH&&!preloadSecs&&!COURSE.lapLine&&RIDERS[PRIMARY]&&RIDERS[PRIMARY].M){const rec=savedLine(RIDERS[PRIMARY].M);
+    if(rec){COURSE.lapLine={lat:rec.lat,lon:rec.lon};COURSE.lapHeading=rec.heading!=null?rec.heading:null;
+      if(analyzeAll())lineBack=true;else{COURSE.lapLine=null;COURSE.lapHeading=null;analyzeAll();}}}
   activate(PRIMARY);
   state.mz={z:1,vx:0,vy:0};state.base='best';state.sel=null;state.corner=null;state.xr=null;state.editing=false;
   state.mapLap=bestLap;state.vis=Array(NL).fill(true);
   AUTO=autoSections(M);
   const had=loadUser(preloadSecs);loadCornerNames(preloadSecs&&preloadSecs.corners);loadMarks(preloadSecs&&preloadSecs.marks);
   if(preloadSecs&&state.secMode!=='user'&&had)state.secMode='user';
+  {const back=[];if(lineBack)back.push('your saved lap line');if(FRESH&&!preloadSecs&&had&&SAVE_ON){state.secMode='user';back.push('your saved sections');}
+    if(back.length)showNote(`Opened with ${back.join(' and ')} for this course.`+(back.includes('your saved sections')?' Your sections are under "Mine"; click "Automatic" for the automatic ones.':'')+(lineBack?' To change the lap line, use "Move lap line" on the course map.':''));}
+  FRESH=false;
   const ok=okRiders();
   if(!isMulti()&&(typeof state.view!=='number'||!RIDERS[state.view]||!RIDERS[state.view].M))state.view=PRIMARY;
   if(isMulti()&&ok.length<2)state.view=PRIMARY;
@@ -1125,7 +1248,7 @@ function run(preloadSecs){
   if(!ok.includes(state.cmp.b)||state.cmp.b===state.cmp.a)state.cmp.b=ok.find(i=>i!==state.cmp.a);
   showDrop(false);renderAll();return true;
 }
-function showDrop(v){$('drop').hidden=!v;$('report').hidden=v||!M;$('topbtns').hidden=!M;}
+function showDrop(v){$('drop').hidden=!v;$('report').hidden=v||!M;$('topbtns').hidden=!M;layoutDock();}
 $('file').onchange=e=>{if(e.target.files.length)handleFiles([...e.target.files],false);e.target.value='';};
 $('addfile').onchange=e=>{if(e.target.files.length)handleFiles([...e.target.files],true);e.target.value='';};
 const reportOpen=()=>!!M&&!$('report').hidden;
@@ -1173,7 +1296,14 @@ function renderRiderList(){
     const fix=v=>typeof v==='number'?(v>i?v-1:v===i?0:v):v;state.view=fix(state.view);state.cmp.a=fix(state.cmp.a);state.cmp.b=fix(state.cmp.b);
     run();renderSettings();});
 }
-function renderSettings(){if(!M)return;renderRiderList();
+function renderSaveSetting(){$('savebrowser').checked=SAVE_ON;let has=false;try{has=!!M&&(lsGet().some(courseMatch)||cnGet().some(courseMatch)||stGet().some(courseMatch));}catch(e){}
+  if(!has&&M)has=llGet().some(r=>llMatch(M,r));$('forgetcourse').disabled=!has;
+  $('savehint').textContent=SAVE_ON?'Your sections, section marks (barriers, run-up), corner names and a lap line you picked on the map are kept in this browser for each course, and come back when you load a file from the same course. Nothing leaves your computer.'
+    :'Off: your sections, section marks, corner names and lap line last until you close this page. To keep them, use Export in the section editor, or Save report as HTML.';}
+$('savebrowser').onchange=e=>{SAVE_ON=e.target.checked;try{localStorage.setItem(SAVEKEY,SAVE_ON?'1':'0');}catch(_){}
+  if(SAVE_ON&&M){if(USER)saveUser();saveCornerNames();saveMarks();saveLapLine();}renderSaveSetting();if(state.editing)renderAll();};
+$('forgetcourse').onclick=()=>{if(!M)return;forgetCourse();renderSaveSetting();showNote('Removed what was saved in this browser for this course. What you see now stays until you close the page'+(SAVE_ON?' or change something (saving is still on).':'.'));};
+function renderSettings(){if(!M)return;renderRiderList();renderSaveSetting();
   $('entmode').value=state.entries;$('entnote').textContent=racesMode()?'currently: races (different days)':'currently: riders';
   const cmp=isMulti();$('ridersettingshead').textContent=cmp?`Race start and finish (set for each ${entW(1)})`:`Race start and finish for ${FILE}`;
   if(cmp){
@@ -1188,21 +1318,74 @@ function renderSettings(){if(!M)return;renderRiderList();
   }
   $('startsec').value=M.rs;$('startnote').textContent=M.hasPower?`(auto-detected: ${M.autoStart}s — no power, then a big jump)`:`(auto: first movement at ${M.autoStart}s)`;
   $('finsec').value=M.fin;$('finnote').textContent=M.hasPower?`(auto-detected: ${M.autoFin}s — last big effort before power drops off)`:'(end of file)';
-  const devOn=RIDERS[PRIMARY].M.dev.used;
-  $('lapnote').textContent=devOn?'set by the device lap markers (see Lap splitting)':COURSE.lapLine?'custom point picked on the map':`where ${RIDERS[PRIMARY].name} was at the race start`;
+  const devOn=RIDERS[PRIMARY].M.dev.used,manOn=RIDERS[PRIMARY].M.man.used;
+  $('lapnote').textContent=manOn?(COURSE.lapLine?'custom point picked on the map; your lap ends snap to it':`where ${RIDERS[PRIMARY].name} was at the race start; your lap ends snap to it`):devOn?'set by the device lap markers (see Lap splitting)':COURSE.lapLine?'custom point picked on the map':`where ${RIDERS[PRIMARY].name} was at the race start`;
   renderLapSplit();renderTrims();}
 // Lap splitting: which riders' files have usable device laps (2 or more inside the race window)
 function renderLapSplit(){
   const sel=$('lapsplit'),P0=RIDERS[PRIMARY].M,ok=okRiders();
   const rows=(isMulti()?ok:[state.view]).map(i=>{const r=RIDERS[i],d=r.M.dev;
     return `${isMulti()?esc(r.name)+': ':''}${d.nTotal} lap marker${d.nTotal===1?'':'s'} in the file${d.nTotal?`, ${d.marks.length} usable inside the race window`:''}`;});
-  const can=P0.dev.marks.length>=2;
-  sel.disabled=!can;sel.value=can&&COURSE.lapSplit==='device'?'device':'auto';
-  $('splitnote').textContent=rows.join(' · ')+(can?'':' — device laps need at least 2 inside the race window'+(isMulti()&&ok.length>1?` on ${RIDERS[PRIMARY].name}'s file, the course reference`:''));
-  $('splithint').hidden=!can&&!P0.dev.nTotal;
+  const can=P0.dev.marks.length>=2,man=COURSE.lapSplit==='manual';
+  sel.querySelector('option[value="device"]').disabled=!can;sel.value=man?'manual':can&&COURSE.lapSplit==='device'?'device':'auto';
+  $('splitnote').textContent=man?'':rows.join(' · ')+(can?'':' — device laps need at least 2 inside the race window'+(isMulti()&&ok.length>1?` on ${RIDERS[PRIMARY].name}'s file, the course reference`:''));
+  $('splithint').hidden=man||!can&&!P0.dev.nTotal;
+  renderManLaps();
+}
+/* ---- lap ends set by hand (Lap splitting: Set by hand) ----
+   r.opt.laps holds a rider's lap ends in seconds into the file. Until the user changes one it is null and the automatic laps are used,
+   so choosing Set by hand changes nothing by itself. */
+// the lap ends the analysis uses now, without the end of a part lap at the finish
+const lapEndsOf=Mr=>{const l=Mr.lapSum[Mr.nl-1];return Mr.B.slice(1,l&&l.partialEnd?-1:undefined);};
+const lapsOf=r=>r.opt.laps&&r.opt.laps.length?r.opt.laps:r.M?lapEndsOf(r.M):[];
+// "8:23", "1:02:05" or plain seconds
+const parseMs=v=>{v=String(v).trim();if(!v)return NaN;const p=v.split(':');if(p.length>3||p.some(x=>!/^\d+(\.\d+)?$/.test(x.trim())))return NaN;return p.reduce((a,x)=>a*60+parseFloat(x),0);};
+function setLaps(r,list){r.opt.laps=[...new Set(list.filter(t=>isFinite(t)).map(t=>Math.max(0,Math.round(t))))].sort((a,b)=>a-b);if(!r.opt.laps.length)r.opt.laps=null;}
+function rerunLaps(r,list){setLaps(r,list);run();renderSettings();}
+function renderManLaps(){
+  const el=$('manlaps');
+  if(COURSE.lapSplit!=='manual'){el.hidden=true;el.innerHTML='';return;}
+  const ids=(isMulti()?okRiders():[state.view]).filter(i=>RIDERS[i]&&RIDERS[i].M);
+  el.hidden=false;
+  el.innerHTML=ids.map(i=>{const r=RIDERS[i],Mr=r.M,L=lapsOf(r),own=!!(r.opt.laps&&r.opt.laps.length);
+    const mi=Mr.man.used?Mr.man:null,seen=new Set();
+    const rows=L.map((t,j)=>{const p=mi&&mi.pairs.find(q=>q.asked===Math.round(t)),inWin=t>Mr.rs+10&&t<=Mr.fin;
+      const q=p?p.lap:own?-1:j,dup=q>=0&&seen.has(q);if(q>=0)seen.add(q);
+      const lg=mi&&mi.long.find(o=>o.k===q),sh=mi&&mi.short.includes(q),ls=q>=0&&!dup?Mr.lapSum[q]:null;
+      const notes=[];
+      if(!inWin)notes.push('outside the race window, not used');
+      else if(dup)notes.push('the same pass of the lap line as the lap end before it, not used');
+      else{
+        if(p&&!p.near)notes.push(`<span style="color:var(--bad)">no pass of the lap line within ${mi.W} s, used as typed: check this lap</span>`);
+        else if(p&&Math.abs(p.used-p.asked)>=2)notes.push(`snapped to ${fmtMs(p.used)}, where you passed the lap line`);
+        if(ls&&isFinite(ls.time))notes.push(`lap time ${fmtT(ls.time)}${lg?' (only its first time round counts)':''}`);
+        if(lg)notes.push(`<span style="color:var(--bad)">this lap is about ${lg.n} laps long: add a lap end?</span>`);
+        if(sh)notes.push(`<span style="color:var(--bad)">this lap is much shorter than the others: remove a lap end?</span>`);}
+      return `<div class="row-flex lapend"><span class="lbl" style="min-width:96px">${q>=0&&!dup&&inWin?`Lap ${q+1} ends at`:'Lap end'}</span><input type="text" inputmode="numeric" data-le="${i}:${j}" value="${fmtMs(t)}" style="width:76px" aria-label="Lap end ${j+1}, minutes and seconds into the recording">
+        <span class="note">${notes.join(' · ')}</span><button data-ld="${i}:${j}" title="Remove this lap end" aria-label="Remove lap end ${j+1}">×</button></div>`;}).join('');
+    const prev=Mr.B[Mr.B.length-1-(Mr.lapSum[Mr.nl-1]&&Mr.lapSum[Mr.nl-1].partialEnd?1:0)],tail=Mr.fin-prev,partLap=Mr.lapSum[Mr.nl-1]&&Mr.lapSum[Mr.nl-1].partialEnd;
+    return `<div style="margin:8px 0 14px">${isMulti()?`<div class="lbl" style="margin-bottom:4px">${swc(riderColor(i))} ${esc(r.name)}</div>`:''}
+      ${Mr.manFail?`<p class="note" style="color:var(--bad);margin:0 0 6px">These lap ends couldn't be used (${esc(Mr.manFail)}), so laps are split at the lap line for now.</p>`:''}
+      <div class="note" style="margin-bottom:4px">Race start ${fmtMs(Mr.rs)} · race finish ${fmtMs(Mr.fin)}${own?'':' · these are the automatic laps until you change one'}</div>${rows}
+      ${tail>30?`<div class="note">After the last lap end: ${fmtMs(tail)} to the finish${partLap?', counted as a part lap':', not counted as a lap'}.</div>`:''}
+      <div class="row-flex" style="margin-top:6px"><button data-la="${i}">Add a lap end</button>${own?`<button data-lr="${i}">Go back to the automatic laps</button>`:''}${Mr.dev.marks.length?`<button data-lv="${i}">Copy the device lap markers (${Mr.dev.marks.length})</button>`:''}</div></div>`;}).join('')+
+    `<p class="hint">Times are minutes:seconds into the recording, the same clock as the timeline above. On the timeline you can also drag a lap end, click to add one, or double-click one to remove it. A lap end only needs to be roughly right: lap times are measured where you pass the lap line, so each lap end snaps to the nearest pass. The lap line is where you were at the race start, unless you pick one on the map (above). The last lap should end at the finish; a piece of more than half a lap left after the last lap end counts as a part lap.</p>`;
+  const who=s=>{const [i,j]=s.split(':').map(Number);return {r:RIDERS[i],j};};
+  el.querySelectorAll('input[data-le]').forEach(inp=>{inp.onkeydown=e=>{e.stopPropagation();if(e.key==='Enter')inp.blur();};
+    inp.onchange=()=>{const {r,j}=who(inp.dataset.le),v=parseMs(inp.value),L=lapsOf(r).slice();
+      if(!isFinite(v)){inp.value=fmtMs(L[j]);showNote('Type the lap end as minutes:seconds, for example 8:23.');return;}
+      L[j]=v;rerunLaps(r,L);};});
+  el.querySelectorAll('button[data-ld]').forEach(b=>b.onclick=()=>{const {r,j}=who(b.dataset.ld),L=lapsOf(r).slice();L.splice(j,1);
+    if(!L.length){showNote('A race needs at least one lap end. Use "Go back to the automatic laps" to start again.');return;}rerunLaps(r,L);});
+  // a new lap end goes in the middle of the longest lap (the usual case: two laps were merged into one)
+  el.querySelectorAll('button[data-la]').forEach(b=>b.onclick=()=>{const r=RIDERS[+b.dataset.la],Mr=r.M,L=lapsOf(r).slice();
+    const pts=[Mr.rs,...L.filter(t=>t>Mr.rs&&t<Mr.fin),Mr.fin];let k=0;for(let q=1;q+1<pts.length;q++)if(pts[q+1]-pts[q]>pts[k+1]-pts[k])k=q;
+    L.push((pts[k]+pts[k+1])/2);rerunLaps(r,L);});
+  el.querySelectorAll('button[data-lr]').forEach(b=>b.onclick=()=>{RIDERS[+b.dataset.lr].opt.laps=null;run();renderSettings();});
+  el.querySelectorAll('button[data-lv]').forEach(b=>b.onclick=()=>{const r=RIDERS[+b.dataset.lv];rerunLaps(r,r.M.dev.marks.slice());});
 }
 $('entmode').onchange=e=>{state.entries=e.target.value;renderAll();renderSettings();};
-$('lapsplit').onchange=e=>{COURSE.lapSplit=e.target.value==='device'?'device':'auto';run();renderSettings();};
+$('lapsplit').onchange=e=>{const v=e.target.value;COURSE.lapSplit=v==='device'||v==='manual'?v:'auto';run();renderSettings();};
 $('startauto').onclick=()=>{opt.startSec=null;run();renderSettings();};
 $('startsec').oninput=$('finsec').oninput=()=>renderTrims();
 $('finauto').onclick=()=>{opt.finishSec=null;run();renderSettings();};
@@ -1222,39 +1405,69 @@ $('rerun').onclick=rerunNow;
 
 /* ---- trim timeline: the whole recording with the race window and two draggable handles ---- */
 const fmtMs=t=>Math.floor(t/60)+':'+String(Math.floor(t%60)).padStart(2,'0');
+// zoomed view of each rider's timeline (Ctrl + scroll), in seconds into the file: {v0, v1}
+const TZ={};
 function drawTrim(el,i){
   const r=RIDERS[i];if(!r||!r.M){el.innerHTML='';return;}
   const Mr=r.M,N=r.RAW.n,cmp=isMulti();
   const W=Math.max(320,el.clientWidth||900),H=122,m={l:44,r:14,t:20,b:24},pw=W-m.l-m.r;
+  const z=TZ[i]&&TZ[i].v1-TZ[i].v0<N-1.5?TZ[i]:null,v0=z?z.v0:0,v1=z?z.v1:N-1,span=v1-v0;
   const wk=Mr.hasPower&&wkOn()&&kgOf(r)>0,kg=wk?kgOf(r):1;
   const raw=Mr.hasPower?Mr.P:Mr.V.map(v=>v*MPH),sm=roll(raw,5);
-  const nb=Math.max(10,Math.min(N,Math.floor(pw))),ys=[];
-  for(let b=0;b<nb;b++){const a=Math.floor(b*N/nb),z=Math.max(a+1,Math.floor((b+1)*N/nb));let t=0;for(let j=a;j<z&&j<N;j++)t+=sm[j];ys.push(t/(z-a));}
+  // one bar per screen pixel over the part of the recording in view (or per second when zoomed in further than that)
+  const nb=Math.max(10,Math.min(Math.ceil(span)+1,Math.floor(pw))),ys=[];
+  for(let b=0;b<nb;b++){const a=Math.floor(v0+b*span/nb),e=Math.max(a+1,Math.floor(v0+(b+1)*span/nb));let t=0;for(let j=a;j<e&&j<N;j++)t+=sm[j];ys.push(t/Math.max(1,Math.min(e,N)-a));}
   const yv=ys.map(v=>Mr.hasPower?v/kg:cvS(v)),ymax=Math.max(1,...yv)*1.05;
-  const x=t=>m.l+t/(N-1)*pw,y=v=>H-m.b-v/ymax*(H-m.t-m.b);
+  const x=t=>m.l+(t-v0)/span*pw,y=v=>H-m.b-v/ymax*(H-m.t-m.b);
   const bs=cmp?document.querySelector(`#sfmulti input[data-sfs="${i}"]`):$('startsec'),bf=cmp?document.querySelector(`#sfmulti input[data-sff="${i}"]`):$('finsec');
   const rd=(inp,d)=>{const v=inp?parseFloat(inp.value):NaN;return isFinite(v)?Math.max(0,Math.min(N-1,v)):d;};
   let cs=rd(bs,Mr.rs),cf=rd(bf,Mr.fin);if(cf<cs)[cs,cf]=[cf,cs];
+  let ax='';
   let h=`<path d="M${m.l},${H-m.b} ${yv.map((v,b)=>`L${(m.l+(b+.5)/nb*pw).toFixed(1)},${y(v).toFixed(1)}`).join(' ')} L${W-m.r},${H-m.b} Z" fill="var(--l1)" opacity=".18"/><path d="${yv.map((v,b)=>`${b?'L':'M'}${(m.l+(b+.5)/nb*pw).toFixed(1)},${y(v).toFixed(1)}`).join(' ')}" fill="none" stroke="var(--l1)" stroke-width="1.2"/>`;
-  niceTicks(0,ymax,3).forEach(v=>{h+=`<line x1="${m.l}" x2="${W-m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/><text x="${m.l-6}" y="${y(v)+3.5}" text-anchor="end">${wk?v.toFixed(1):Math.round(v)}</text>`;});
-  h+=`<text x="2" y="10" style="fill:var(--ink2)">${Mr.hasPower?(wk?'W/kg':'W'):spdU()}</text>`;
-  const stepT=[30,60,120,300,600,900,1200,1800,3600].find(st=>N/st<=9)||3600;
-  for(let t=0;t<N;t+=stepT)h+=`<text x="${x(t)}" y="${H-6}" text-anchor="middle">${fmtMs(t)}</text>`;
-  h+=`<line x1="${m.l}" x2="${W-m.r}" y1="${H-m.b}" y2="${H-m.b}" stroke="var(--axis)"/>`;
+  niceTicks(0,ymax,3).forEach(v=>{ax+=`<line x1="${m.l}" x2="${W-m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/><text x="${m.l-6}" y="${y(v)+3.5}" text-anchor="end">${wk?v.toFixed(1):Math.round(v)}</text>`;});
+  ax+=`<text x="2" y="10" style="fill:var(--ink2)">${Mr.hasPower?(wk?'W/kg':'W'):spdU()}</text>`;
+  const stepT=[5,10,15,30,60,120,300,600,900,1200,1800,3600].find(st=>span/st<=9)||3600;
+  for(let t=Math.ceil(v0/stepT)*stepT;t<=v1;t+=stepT)ax+=`<text x="${x(t)}" y="${H-6}" text-anchor="middle">${fmtMs(t)}</text>`;
+  ax+=`<line x1="${m.l}" x2="${W-m.r}" y1="${H-m.b}" y2="${H-m.b}" stroke="var(--axis)"/>`;
   h+=`<rect class="tshade" x="${x(cs)}" y="${m.t}" width="${Math.max(0,x(cf)-x(cs))}" height="${H-m.t-m.b}" fill="var(--ink)" opacity=".07"/>`;
   if(Mr.autoStart!==cs)h+=`<line x1="${x(Mr.autoStart)}" x2="${x(Mr.autoStart)}" y1="${m.t}" y2="${H-m.b}" stroke="var(--muted)" stroke-dasharray="3 3"><title>Auto-detected start</title></line>`;
   if(Mr.autoFin!==cf)h+=`<line x1="${x(Mr.autoFin)}" x2="${x(Mr.autoFin)}" y1="${m.t}" y2="${H-m.b}" stroke="var(--muted)" stroke-dasharray="3 3"><title>Auto-detected finish</title></line>`;
-  Mr.B.forEach(t=>{h+=`<line x1="${x(t)}" x2="${x(t)}" y1="${H-m.b-9}" y2="${H-m.b}" stroke="var(--ink)" stroke-width="1"/>`;});
+  const man=COURSE.lapSplit==='manual',LE=man?lapsOf(r):[];
+  if(!man)Mr.B.forEach(t=>{h+=`<line x1="${x(t)}" x2="${x(t)}" y1="${H-m.b-9}" y2="${H-m.b}" stroke="var(--ink)" stroke-width="1"/>`;});
   devOf(r.RAW).forEach(e=>{h+=`<circle cx="${x(Math.max(0,Math.min(N-1,e.t)))}" cy="${H-m.b}" r="2.6" fill="var(--surface)" stroke="var(--ink2)"><title>Device lap marker at ${fmtMs(e.t)}</title></circle>`;});
   const hnd=(k,t,lab)=>`<g class="trimh" data-h="${k}" transform="translate(${x(t)},0)"><rect x="-7" y="${m.t-14}" width="14" height="${H-m.t+14-m.b+4}" fill="transparent"/><line y1="${m.t}" y2="${H-m.b}" stroke="var(--ink)" stroke-width="2"/><rect x="-5" y="${m.t-8}" width="10" height="16" rx="3" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"/><text class="tlab" y="${m.t-11}" text-anchor="${k==='s'?'start':'end'}" x="${k==='s'?8:-8}" style="fill:var(--ink);font-weight:600">${lab} ${fmtMs(t)}</text></g>`;
+  // lap ends set by hand: draggable, numbered by the lap they end
+  const lh=(t,j)=>`<g class="laph" data-j="${j}" transform="translate(${x(t)},0)"><title>End of lap ${j+1} at ${fmtMs(t)}. Drag to move it, double-click to remove it.</title><rect x="-6" y="${m.t}" width="12" height="${H-m.t-m.b+4}" fill="transparent"/><line y1="${m.t+12}" y2="${H-m.b}" stroke="var(--l2)" stroke-width="1.6"/><path d="M-5,${H-m.b+3} L5,${H-m.b+3} L0,${H-m.b-5} Z" fill="var(--l2)"/><text class="llab" y="${m.t+10}" text-anchor="middle" style="fill:var(--l2);font-weight:600">${j+1}</text></g>`;
+  LE.forEach((t,j)=>{h+=lh(Math.max(0,Math.min(N-1,t)),j);});
   h+=hnd('s',cs,'start')+hnd('f',cf,'finish');
-  el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Recording timeline with the race start and finish handles"></svg><p class="hint" style="margin:0">${cmp?'':`Whole recording (${Mr.hasPower?'power':'speed'}, lightly smoothed). Drag the handles to change the start and finish; the analysis re-runs when you let go. `}Shaded = race window · thin ticks = lap boundaries${devOf(r.RAW).length?' · small circles = device lap markers':''} · dashed = auto-detected.</p>`;
-  const svg=el.querySelector('svg');svg.innerHTML=h;
+  el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="Recording timeline with the race start and finish handles"></svg><p class="hint" style="margin:0">${z?`<button class="tzreset" style="min-height:0;padding:1px 8px;margin-right:6px">Reset zoom</button>Zoomed to ${fmtMs(v0)}–${fmtMs(v1)} · `:''}${cmp?'':`${z?'':'Whole recording'} (${Mr.hasPower?'power':'speed'}, lightly smoothed). Drag the handles to change the start and finish; the analysis re-runs when you let go. `}<b>Ctrl + scroll</b> zooms in for a more exact spot${z?'; Shift + scroll moves along':''}. Shaded = race window · ${man?'numbered orange lines = lap ends (drag to move, double-click to remove, click the timeline to add one)':'thin ticks = lap boundaries'}${devOf(r.RAW).length?' · small circles = device lap markers':''} · dashed = auto-detected.</p>`;
+  const svg=el.querySelector('svg');svg.innerHTML=ax+`<defs><clipPath id="tclip-${i}"><rect x="${m.l-8}" y="0" width="${pw+16}" height="${H}"/></clipPath></defs><g clip-path="url(#tclip-${i})">${h}</g>`;
+  const tRaw=e=>{const rc=svg.getBoundingClientRect(),px=(e.clientX-rc.left)*W/(rc.width||W);return v0+(px-m.l)/pw*span;};
+  const tAt=e=>Math.max(0,Math.min(N-1,Math.round(tRaw(e))));
+  // Ctrl + scroll (or a trackpad pinch) zooms around the pointer; Shift + scroll or a sideways scroll moves along while zoomed in
+  const setZ=(a,b)=>{const sp=Math.max(30,Math.min(N-1,b-a));a=Math.max(0,Math.min(N-1-sp,a));TZ[i]=sp>=N-1.5?null:{v0:a,v1:a+sp};drawTrim(el,i);};
+  svg.onwheel=ev=>{const side=ev.shiftKey||Math.abs(ev.deltaX)>Math.abs(ev.deltaY);
+    if(ev.ctrlKey||ev.metaKey){ev.preventDefault();const t=Math.max(v0,Math.min(v1,tRaw(ev))),f=Math.exp(Math.max(-1,Math.min(1,ev.deltaY/300))),sp=Math.max(30,Math.min(N-1,span*f));setZ(t-(t-v0)*sp/span,t-(t-v0)*sp/span+sp);return;}
+    if(z&&side){ev.preventDefault();const d=(Math.abs(ev.deltaX)>Math.abs(ev.deltaY)?ev.deltaX:ev.deltaY)/pw*span;setZ(v0+d,v1+d);}};
+  const zr=el.querySelector('.tzreset');if(zr)zr.onclick=()=>{TZ[i]=null;drawTrim(el,i);};
+  if(man){
+    svg.classList.add('addlap');let lastDrag=0;
+    svg.querySelectorAll('.laph').forEach(g=>{const j=+g.dataset.j;
+      g.onpointerdown=ev=>{if(ev.button)return;ev.preventDefault();ev.stopPropagation();let t0=LE[j],t=t0;
+        const mv=e=>{t=tAt(e);g.setAttribute('transform',`translate(${x(t)},0)`);};
+        const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up);removeEventListener('pointercancel',up);
+          if(t!==t0){lastDrag=Date.now();const L=LE.slice();L[j]=t;rerunLaps(r,L);}};
+        addEventListener('pointermove',mv);addEventListener('pointerup',up);addEventListener('pointercancel',up);};
+      g.ondblclick=ev=>{ev.stopPropagation();const L=LE.slice();L.splice(j,1);if(!L.length){showNote('A race needs at least one lap end.');return;}rerunLaps(r,L);};});
+    svg.onclick=ev=>{if(ev.detail>1||Date.now()-lastDrag<400||ev.target.closest('.laph,.trimh'))return;const t=tAt(ev);
+      if(t<=cs+10||t>cf){showNote('Lap ends go inside the race window (the shaded part of the timeline).');return;}
+      if(LE.some(u=>Math.abs(u-t)<10))return;rerunLaps(r,[...LE,t]);};
+  }
   const cur={s:cs,f:cf};
   const place=()=>{svg.querySelector('.tshade').setAttribute('x',x(cur.s));svg.querySelector('.tshade').setAttribute('width',Math.max(0,x(cur.f)-x(cur.s)));
     ['s','f'].forEach(k=>{const g=svg.querySelector(`.trimh[data-h="${k}"]`);g.setAttribute('transform',`translate(${x(cur[k])},0)`);g.querySelector('.tlab').textContent=(k==='s'?'start ':'finish ')+fmtMs(cur[k]);});};
   svg.querySelectorAll('.trimh').forEach(g=>{g.onpointerdown=ev=>{if(ev.button)return;ev.preventDefault();const k=g.dataset.h;
-    const mv=e=>{const rc=svg.getBoundingClientRect(),px=(e.clientX-rc.left)*W/(rc.width||W);let t=Math.round((px-m.l)/pw*(N-1));
+    const mv=e=>{let t=Math.round(tRaw(e));
       if(k==='s')t=Math.max(0,Math.min(Math.min(N-61,cur.f-60),t));else t=Math.max(Math.max(0,cur.s+60),Math.min(N-1,t));
       cur[k]=t;place();const inp=k==='s'?bs:bf;if(inp)inp.value=t;};
     const up=()=>{removeEventListener('pointermove',mv);removeEventListener('pointerup',up);removeEventListener('pointercancel',up);rerunNow();};
@@ -1265,7 +1478,7 @@ function renderTrims(){
   if(isMulti())document.querySelectorAll('#sfmulti .trimbox').forEach(el=>drawTrim(el,+el.dataset.trim));
   else drawTrim($('trimsingle'),state.view);
 }
-$('lineauto').onclick=()=>{COURSE.lapLine=null;COURSE.lapHeading=null;run();renderSettings();};
+$('lineauto').onclick=()=>{forgetLapLine();COURSE.lapLine=null;COURSE.lapHeading=null;run();renderSettings();};
 $('pickline').onclick=()=>{state.pickLine=true;state.editing=false;renderMap();$('mapcard').scrollIntoView({behavior:'smooth',block:'center'});};
 
 /* ---- save report ---- */
@@ -1296,7 +1509,7 @@ function saveReport(ids){
   const map=i=>ids.indexOf(i);
   // keep the lap line where it is now even if the course reference rider is left out
   const M0=RIDERS[PRIMARY].M,dropRef=!ids.includes(PRIMARY)&&M0;
-  const course={lapLine:COURSE.lapLine||(dropRef?M0.lapLineLL:null),lapHeading:COURSE.lapHeading!=null?COURSE.lapHeading:(dropRef?M0.lapHeading:null),lapSplit:COURSE.lapSplit==='device'?'device':'auto'};
+  const course={lapLine:COURSE.lapLine||(dropRef?M0.lapLineLL:null),lapHeading:COURSE.lapHeading!=null?COURSE.lapHeading:(dropRef?M0.lapHeading:null),lapSplit:COURSE.lapSplit==='device'||COURSE.lapSplit==='manual'?COURSE.lapSplit:'auto'};
   let view=isMulti()?(ids.length>1?state.view:0):Math.max(0,map(state.view));
   let ca=map(state.cmp.a),cb=map(state.cmp.b);if(ca<0)ca=0;if(cb<0||cb===ca)cb=ids.length>1?(ca===0?1:0):0;
   const pre={v:2,riders:ids.map(i=>{const q=RIDERS[i];return {name:q.name,file:q.file,opt:q.opt,sysLb:q.sysLb,raw:pack(q.RAW)};}),primary:Math.max(0,map(PRIMARY)),course,view,
@@ -1361,12 +1574,66 @@ $('cmetric').onchange=e=>{state.cmetric=e.target.value;renderCorners();};
 $('mode-auto').onclick=()=>{state.secMode='auto';state.editing=false;state.sel=null;renderAll();};
 $('mode-user').onclick=()=>{state.secMode='user';state.sel=null;renderAll();};
 $('editsec').onclick=()=>{if(state.editing)state.editing=false;else{if(isMulti())state.view=PRIMARY;startEditing();}renderAll();};
-function selectSection(i,zoom=true){if(state.editing)return;state.sel=i;state.corner=null;if(zoom){const s=S[i];const pad=(s.ft1-s.ft0)*0.08;state.xr=[Math.max(0,s.ft0-pad),Math.min(FTMAX,s.ft1+pad)];}renderAll();}
-function selectCorner(j){if(state.editing)return;const c=CR[j];state.corner=j;state.sel=c.sec-1;state.xr=[Math.max(0,c.ft-250),Math.min(FTMAX,c.ft+250)];renderAll();}
+// Several sections at once: Ctrl + click (⌘ + click on a Mac) adds a section to the selection or takes it out. state.sels holds them (in lap order)
+// when there are two or more; state.sel is the last one clicked. The section card then adds them up, and the charts shade all of them.
+let CLICK_MULTI=false;
+addEventListener('click',e=>{CLICK_MULTI=e.ctrlKey||e.metaKey;setTimeout(()=>{CLICK_MULTI=false;},0);},true);
+const selSet=()=>state.sels&&state.sels.length>1?state.sels:state.sel!=null?[state.sel]:[];
+const multiSel=()=>!!state.sels&&state.sels.length>1;
+function clearSel(){state.sel=null;state.sels=[];state.corner=null;state.xr=null;renderAll();}
+// Esc clears the selection (outside the section editor and text boxes)
+document.addEventListener('keydown',ev=>{if(ev.key!=='Escape'||state.editing||!M||!$('dropchoice').hidden)return;const tag=(ev.target.tagName||'').toLowerCase();if(tag==='input'||tag==='select'||tag==='textarea')return;if(state.sel!=null||state.corner!=null)clearSel();});
+function selectSection(i,zoom=true){if(state.editing)return;
+  if(CLICK_MULTI){let cur=selSet().slice();cur=cur.includes(i)?cur.filter(x=>x!==i):[...cur,i].sort((a,b)=>a-b);
+    state.sels=cur.length>1?cur:[];state.sel=cur.length?(cur.includes(i)?i:cur[cur.length-1]):null;state.corner=null;
+    if(cur.length&&zoom){const a=Math.min(...cur.map(k=>S[k].ft0)),b=Math.max(...cur.map(k=>S[k].ft1)),pad=(b-a)*0.05;state.xr=[Math.max(0,a-pad),Math.min(FTMAX,b+pad)];}else if(!cur.length)state.xr=null;
+    renderAll();return;}
+  state.sels=[];state.sel=i;state.corner=null;if(zoom){const s=S[i];const pad=(s.ft1-s.ft0)*0.08;state.xr=[Math.max(0,s.ft0-pad),Math.min(FTMAX,s.ft1+pad)];}renderAll();}
+function selectCorner(j){if(state.editing)return;const c=CR[j];state.corner=j;state.sels=[];state.sel=c.sec-1;state.xr=[Math.max(0,c.ft-250),Math.min(FTMAX,c.ft+250)];renderAll();}
 
 /* ---- section editing ---- */
-const ED={tool:'draw',start:0,end:null,down:false,hist:[],drag:null,lock:null,done:false};
-function startEditing(){rpReset();state.editing=true;state.secMode='user';state.sel=null;state.corner=null;ED.tool='draw';ED.start=0;ED.end=null;ED.done=false;ED.hist=[];ED.drag=null;}
+// hover: where the pointer is on the course (m along the lap), from the map or a chart, for S (split here). sel: the section picked in the list.
+const ED={tool:'draw',start:0,end:null,down:false,hist:[],drag:null,lock:null,done:false,hover:null,sel:null};
+function startEditing(){rpReset();state.editing=true;state.secMode='user';state.sel=null;state.corner=null;ED.tool='adjust';ED.start=null;ED.end=null;ED.done=false;ED.hist=[];ED.drag=null;ED.hover=null;ED.sel=null;}
+function nearestS(w){let bg=-1,bd=60;for(let g=0;g<M.NG;g++){const d=Math.hypot(M.gx[g]-w.x,M.gy[g]-w.y);if(d<bd){bd=d;bg=g;}}return bg>=0?M.G[bg]:null;}
+// a boundary dragged onto its neighbour (or the lap line) closes up the section between them: the two sections on either side become one
+const MERGE_M=8;
+// Moving boundary ci to `to`: boundaries it passes over are removed (the sections in between merge into the one being stretched), and landing on
+// another boundary or the lap line (within MERGE_M) removes it too. Returns the new boundaries and how many sections disappear.
+function cutPlan(ci,to){const old=USER.cuts,from=old[ci],lo=Math.min(from,to),hi=Math.max(from,to),keep=[];let gone=0;
+  old.forEach((c,k)=>{if(k===ci)return;if(c>lo&&c<hi)gone++;else keep.push(c);});
+  const land=to<MERGE_M||to>M.Lref-MERGE_M||keep.some(c=>Math.abs(c-to)<MERGE_M);
+  return {cuts:land?keep:[...keep,to].sort((a,b)=>a-b),gone:gone+(land?1:0),land};}
+// names after boundaries change: a section keeps the name of the old section with the same start (or else the same end, or else the one it overlaps
+// most); a name you typed is kept as it is, an automatic one is worked out again for the new stretch
+function namesFor(newCuts){const ob=[0,...USER.cuts,M.Lref],nb=[0,...newCuts,M.Lref],old=[];
+  for(let i=0;i<ob.length-1;i++)old.push({a:ob[i],b:ob[i+1],name:USER.names[i]||'',auto:nameSection(M,ob[i],ob[i+1],i)});
+  return nb.slice(0,-1).map((a,i)=>{const b=nb[i+1];let o=old.find(q=>Math.abs(q.a-a)<0.5)||old.find(q=>Math.abs(q.b-b)<0.5);
+    if(!o){let best=0;old.forEach(q=>{const ov=Math.min(b,q.b)-Math.max(a,q.a);if(ov>best){best=ov;o=q;}});}
+    const same=o&&Math.abs(o.a-a)<0.5&&Math.abs(o.b-b)<0.5;return o&&(same||(o.name&&o.name!==o.auto))?o.name:nameSection(M,a,b,i);});}
+function moveCut(ci,to,hist=true){if(ci<0||ci>=USER.cuts.length)return;to=Math.max(0,Math.min(M.Lref,to));
+  // the picked section stays picked: it is found again by its end that didn't move
+  const sel=ED.sel!=null&&S[ED.sel]?{a:S[ED.sel].s0,b:S[ED.sel].s1,moved:ci===ED.sel?'end':ci===ED.sel-1?'start':null}:null;
+  const p=cutPlan(ci,to);if(hist)pushHist();USER={cuts:p.cuts,names:namesFor(p.cuts)};
+  if(sel){const nb=[0,...p.cuts,M.Lref];let k=-1;
+    if(sel.moved==='end')k=nb.findIndex(v=>Math.abs(v-sel.a)<0.5);else if(sel.moved==='start')k=nb.findIndex(v=>Math.abs(v-sel.b)<0.5)-1;else k=nb.findIndex(v=>Math.abs(v-sel.a)<0.5);
+    ED.sel=k>=0&&k<nb.length-1?k:null;}
+  saveUser();}
+// arrow keys on a picked section: ← → move its end, Shift + ← → its start (3 m a press; held keys repeat, and count as one step for Undo)
+let NUDGE_T=0;
+function nudgePicked(which,dir){const i=ED.sel;if(i==null||!S[i])return;const ci=which==='end'?i:i-1;if(ci<0||ci>=USER.cuts.length){showNote(which==='end'?'The last section ends at the lap line, which moves with the lap line itself.':'The first section starts at the lap line, which moves with the lap line itself.');return;}
+  const now=Date.now();moveCut(ci,USER.cuts[ci]+dir*3,now-NUDGE_T>1200);NUDGE_T=now;renderAll();}
+// S: split the section under the pointer
+function splitAtCursor(){const s=ED.hover;
+  if(s==null){showNote('Point at the course on the map (or at a chart) where you want the new boundary, then press S.');return;}
+  if(s<MERGE_M||s>M.Lref-MERGE_M||USER.cuts.some(c=>Math.abs(c-s)<MERGE_M)){showNote('There is already a boundary there.');return;}
+  addCut(s);}
+// pick a section in the list: zoom the map to it, and in "Draw in order" carry on drawing from its start
+function zoomToSpan(a,b){if(!mapGeom)return;const xs=[],ys=[];for(let g=0;g<M.NG;g++)if(M.G[g]>=a-1&&M.G[g]<=b+1){xs.push(mapGeom.px(M.gx[g]));ys.push(mapGeom.py(M.gy[g]));}if(!xs.length)return;
+  const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys),W=mapGeom.W,H=mapGeom.H;
+  const z=Math.max(1,Math.min(8,W/((x1-x0)*1.8+60),H/((y1-y0)*1.8+60)));state.mz.z=z;state.mz.vx=(x0+x1)/2-W/z/2;state.mz.vy=(y0+y1)/2-H/z/2;}
+// picking a section switches to Adjust: nothing follows the pointer; move its start and end with their handles or the arrow keys
+function editSelect(i){const s=S[i];if(!s)return;ED.sel=i;ED.tool='adjust';ED.start=null;ED.end=null;zoomToSpan(s.s0,s.s1);renderAll();}
 // Replace USER cuts, keeping a section's name if it's unchanged or was typed by you; otherwise auto-name it.
 function setUser(cuts){
   cuts=[...cuts].sort((a,b)=>a-b);
@@ -1404,7 +1671,13 @@ function updateDraw(){
   const hl=(a,b,col)=>`<polyline points="${coursePts(a,b)}" fill="none" stroke="var(--ink)" stroke-width="${(hw+3)*K}" stroke-linecap="round" stroke-linejoin="round" opacity="${zf?.35:.85}"/><polyline points="${coursePts(a,b)}" fill="none" stroke="${col}" stroke-width="${hw*K}" stroke-linecap="round" stroke-linejoin="round" opacity="${zf?.8:1}"/>`;
   const label=(s,txt)=>{const p=at(s);return `<text x="${p.x+10*K}" y="${p.y-10*K}" style="font-size:${12*K}px;font-weight:650;fill:var(--ink);paint-order:stroke;stroke:var(--surface);stroke-width:${4*K}px">${esc(txt)}</text>`;};
   const desc=(a,b)=>{const f=sToFt(b)-sToFt(a),t=typicalTime(a,b),c=CR.filter(q=>q.s>=a&&q.s<b).length;return `${uLen(f)} · ~${isFinite(t)?t.toFixed(1):'—'} s · ${c} corner${c===1?'':'s'}`;};
-  if(ED.drag){const d=ED.drag,cuts=USER.cuts,lo=d.ci>0?cuts[d.ci-1]:0,hi=d.ci<cuts.length-1?cuts[d.ci+1]:M.Lref;
+  const plan=ED.drag?cutPlan(ED.drag.ci,ED.drag.cur):null;
+  if(ED.drag&&plan.gone){const d=ED.drag,nb=[0,...plan.cuts,M.Lref];
+    // the stretched section is the one that now covers the ground the handle moved over
+    const mid=(d.orig+d.cur)/2;let k=nb.findIndex(v=>v>mid)-1;if(k<0)k=nb.length-2;
+    const a=nb[k],b=nb[k+1];h+=hl(a,b,css('--l3'));const p=at(d.cur);h+=`<circle cx="${p.x}" cy="${p.y}" r="${7*K}" fill="${css('--l3')}" stroke="var(--surface)" stroke-width="${2.5*K}"/>`+label(d.cur,`let go to merge`);
+    bands=[[a,b,'--l3']];info=`Let go to <b>merge</b>: ${plan.gone===1?'one section joins':plan.gone+' sections join'} the one you're stretching (${desc(a,b)}).`;}
+  else if(ED.drag){const d=ED.drag,cuts=USER.cuts,lo=d.ci>0?cuts[d.ci-1]:0,hi=d.ci<cuts.length-1?cuts[d.ci+1]:M.Lref;
     h+=hl(lo,d.cur,css('--l1'))+hl(d.cur,hi,css('--l2'));const p=at(d.cur);h+=`<circle cx="${p.x}" cy="${p.y}" r="${7*K}" fill="var(--surface)" stroke="var(--ink)" stroke-width="${2.5*K}"/>`;
     h+=label(d.cur,uLen(sToFt(d.cur)));bands=[[lo,d.cur,'--l1'],[d.cur,hi,'--l2']];
     info=`<b>S${d.ci+1}</b>: ${desc(lo,d.cur)}<br><b>S${d.ci+2}</b>: ${desc(d.cur,hi)}`;}
@@ -1415,6 +1688,10 @@ function updateDraw(){
       bands=[[a,ED.end,'--l2']];info=`<b>S${n}</b> from ${uLen(sToFt(a))} to ${uLen(sToFt(ED.end))}${ED.end>=M.Lref-8?' (the lap line)':''}: ${desc(a,ED.end)}`;}
     else info=`<b>S${n}</b> starts at ${uLen(sToFt(a))}. Move along the course to pick where it ends.`;
     h+=`<circle cx="${p0.x}" cy="${p0.y}" r="${7*K}" fill="var(--ink)" stroke="var(--surface)" stroke-width="${2.5*K}"/>`;}
+  else if(ED.tool==='adjust'&&ED.sel!=null&&S[ED.sel]){const s=S[ED.sel];h+=hl(s.s0,s.s1,css('--l1'));bands=[[s.s0,s.s1,'--l1']];
+    if(s.s0>1)h+=label(s.s0,'start');if(s.s1<M.Lref-1)h+=label(s.s1,'end');
+    info=`<b>${esc(secName(ED.sel))}</b> picked: ${desc(s.s0,s.s1)}. Drag its <b>start</b> and <b>end</b> handles, or use ← → for the end and Shift + ← → for the start. Past a neighbouring boundary, the section it passes merges in. S splits where you point.`;}
+  if(ED.tool==='adjust'&&!ED.drag&&ED.hover!=null){const p=at(ED.hover);h+=`<circle cx="${p.x}" cy="${p.y}" r="${4.5*K}" fill="none" stroke="var(--ink)" stroke-width="${1.5*K}" stroke-dasharray="${2*K} ${1.5*K}"/>`;}
   layer.innerHTML=h;
   const di=$('drawinfo');if(di)di.innerHTML=info;
   for(const id in charts){const c=charts[id],svg=$(id);const g=svg&&svg.querySelector('.drawlayer');if(!g)continue;
@@ -1422,10 +1699,13 @@ function updateDraw(){
 }
 document.addEventListener('keydown',ev=>{
   if(!state.editing||!M)return;const tag=(ev.target.tagName||'').toLowerCase();if(tag==='input'||tag==='textarea'||tag==='select')return;
-  if(ev.key==='ArrowRight'||ev.key==='ArrowLeft'){if(ED.tool==='draw'&&ED.start!=null){ev.preventDefault();stepEnd(ev.key==='ArrowRight'?1:-1,ev.shiftKey);}}
+  if(ev.key==='ArrowRight'||ev.key==='ArrowLeft'){const dir=ev.key==='ArrowRight'?1:-1;
+    if(ED.tool==='draw'&&ED.start!=null){ev.preventDefault();stepEnd(dir,ev.shiftKey);}
+    else if(ED.tool==='adjust'&&ED.sel!=null){ev.preventDefault();nudgePicked(ev.shiftKey?'start':'end',dir);}}
   else if(ev.key==='Enter'){if(ED.tool==='draw'){ev.preventDefault();commitDraw();}}
   else if(ev.key==='Backspace'||((ev.ctrlKey||ev.metaKey)&&ev.key==='z')){ev.preventDefault();undoEdit();}
-  else if(ev.key==='Escape'){ED.start=null;ED.end=null;renderAll();}
+  else if(ev.key==='Escape'){ED.start=null;ED.end=null;ED.sel=null;renderAll();}
+  else if((ev.key==='s'||ev.key==='S')&&!ev.ctrlKey&&!ev.metaKey&&!ev.altKey){ev.preventDefault();splitAtCursor();}
 });
 function addCut(s){
   if(s<8||s>M.Lref-8)return;
@@ -1457,15 +1737,18 @@ function adjustedLap(k){
 const lapTimeFor=k=>M.lapSum[k].adj!=null||M.lapSum[k].shortcut?adjustedLap(k).adj:M.lapSum[k].time;
 // lap time used when comparing laps: a different first lap counts with its estimated regular-route time; a lap with no estimate that skipped course has none
 const cmpT=l=>!l?NaN:l.adj!=null?l.adj:l.shortcut?NaN:l.time;
-const lapCell=l=>!l?'':l.adj!=null?`<span title="estimated time on the regular course (actual ${fmtT(l.time)})">≈${fmtT(l.adj)}</span>`:(l.shortcut||l.partial?'≈':'')+fmtT(l.time);
+const lapCell=l=>!l?'':l.adj!=null?`<span title="${l.partialEnd?`estimated full lap: ${fmtT(l.time)} to the finish + ${l.diff[0].est.toFixed(0)} s, the typical time from the finish to the lap line`:`estimated time on the regular course (actual ${fmtT(l.time)})`}">≈${fmtT(l.adj)}</span>`:(l.shortcut||l.partial?'≈':'')+fmtT(l.time);
 // plain-words description of how lap 1 differed and how its estimate is made
 function lap1Text(Mr){const l=Mr.lapSum[0];if(!l||l.adj==null)return '';
-  const ft=s=>{const v=interp1(s,Mr.G,Mr.ftG);return isFinite(v)?v:s*FTM;},parts=l.diff.map(p=>p.kind==='start'?(p.act<3&&p.b===l.diff[0].b&&Mr.laps[0].s0>=p.b-1?`the race started ${uLen(ft(p.b))} past the lap line, so it's short of a full lap`:`it started off the regular course and joined it ${uLen(ft(p.b))} into the lap`):p.kind==='skip'?`it skipped the course from ${uLen(ft(p.a))} to ${uLen(ft(p.b))}`:`it left the regular course between ${uLen(ft(p.a))} and ${uLen(ft(p.b))}`);
+  const ft=s=>{const v=interp1(s,Mr.G,Mr.ftG);return isFinite(v)?v:s*FTM;},parts=l.diff.map(p=>p.kind==='lead'?`the race started ${uLen(p.len*FTM)} before the lap line, so lap 1 is a full lap plus that run-in`:p.kind==='start'?(p.act<3&&p.b===l.diff[0].b&&Mr.laps[0].s0>=p.b-1?`the race started ${uLen(ft(p.b))} past the lap line, so it's short of a full lap`:`it started off the regular course and joined it ${uLen(ft(p.b))} into the lap`):p.kind==='skip'?`it skipped the course from ${uLen(ft(p.a))} to ${uLen(ft(p.b))}`:`it left the regular course between ${uLen(ft(p.a))} and ${uLen(ft(p.b))}`);
   const act=l.diff.reduce((t,p)=>t+p.act,0),est=l.diff.reduce((t,p)=>t+p.est,0);
+  if(l.diff.every(p=>p.kind==='lead'))return `Lap 1 differs from the other laps: ${parts.join('; ')}. For lap-time comparisons lap 1 counts as <b>≈${fmtT(l.adj)}</b>: its real ${fmtT(l.time)} minus the ${act.toFixed(0)} s from the start to the lap line. Race time is unchanged.`;
   return `Lap 1 differs from the other laps: ${parts.join('; ')}. Sections and corners on that part show "—" for lap 1; everything lap 1 shares with the other laps keeps its real time. For lap-time comparisons lap 1 counts as <b>≈${fmtT(l.adj)}</b>: its real ${fmtT(l.time)}${act>=1?`, minus the ${act.toFixed(0)} s it spent off the regular course,`:''} plus ${est.toFixed(0)} s, the median time of the other laps on ${l.diff.length>1?'those stretches':'that stretch'}. Race time is unchanged.`;}
 // notes about device-lap splitting: when it was asked for but couldn't be used, and a warning when the device laps differ a lot in length (not pressed at the same place each lap)
 function devNotes(ids){
   return ids.map(i=>{const r=RIDERS[i],d=r.M&&r.M.dev;if(!d)return '';const nm=`<b>${esc(r.name)}</b>`;
+    if(r.M.manFail)return `<div class="banner">${nm}: the lap ends you set couldn't be used (${esc(r.M.manFail)}), so laps are split at the lap line instead. Change them in Settings, under Lap splitting.</div>`;
+    const mn=r.M.man;if(mn&&mn.used&&(mn.long.length||mn.short.length||mn.pairs.some(p=>!p.near)))return `<div class="banner"><b>Check these laps.</b> ${nm}: ${[mn.long.length?`${mn.long.map(o=>'lap '+(o.k+1)).join(', ')} ${mn.long.length>1?'are':'is'} about two laps long (a lap end is missing)`:'',mn.short.length?`${mn.short.map(k=>'lap '+(k+1)).join(', ')} ${mn.short.length>1?'are':'is'} much shorter than the others (an extra lap end?)`:'',mn.pairs.some(p=>!p.near)?'a lap end you set isn\'t near the lap line':''].filter(Boolean).join('; ')}. Fix the lap ends in Settings, under Lap splitting.</div>`;
     if(r.M.devFail)return `<div class="banner">${nm}: the device lap markers couldn't be used (${esc(r.M.devFail)}), so laps are split at the lap line instead.</div>`;
     if(d.wanted&&!d.used)return `<div class="banner">${nm}: this file has fewer than 2 device lap markers inside the race window, so laps are split at the lap line instead.</div>`;
     if(d.used&&d.spread>0.15)return `<div class="banner"><b>Check these laps.</b> ${nm}: the device laps differ a lot in length (the middle ones range from ${uLen(d.innerMin*FTM)} to ${uLen(d.innerMax*FTM)}, a ${Math.round(d.spread*100)}% spread), so the lap button was probably not pressed at the same place every lap. Lap times, sections and corners below are only meaningful if it was. Switch Lap splitting back to Automatic in Settings if they look wrong.</div>`;
@@ -1479,7 +1762,7 @@ function renderHeader(){
     const ids=okRiders(),date=racesMode()?ids.map(i=>dLong(RIDERS[i])).join(' · '):dLong(RIDERS[PRIMARY]);
     $('subtitle').textContent=`${date} · ${ids.length} ${entW(ids.length)} on the same course · ≈ ${uLap(M.ftG[M.NG-1])}/lap · course reference: ${RIDERS[PRIMARY].name}`;
     const l1=ids.filter(i=>RIDERS[i].M.lapSum[0].adj!=null).map(i=>{const r=RIDERS[i],l=r.M.lapSum[0];return `${esc(dn(r))}: ≈${fmtT(l.adj)} (actual ${fmtT(l.time)})`;});
-    const l1h=l1.length?`<div class="banner">Lap 1 took a different route from the later laps for ${l1.length===1?'one '+entW(1):l1.length+' '+entW(2)}, so lap-1 comparisons use an estimated regular-course time: ${l1.join(' · ')}. The part off the regular course is re-timed with that ${entW(1)}'s median over the same stretch on the other laps; shared sections and corners keep their real times.</div>`:'';
+    const l1h=l1.length?`<div class="banner">Lap 1 took a different route, or started away from the lap line, for ${l1.length===1?'one '+entW(1):l1.length+' '+entW(2)}, so lap-1 comparisons use an estimated regular-course time: ${l1.join(' · ')}. The part off the regular course is re-timed with that ${entW(1)}'s median over the same stretch on the other laps; shared sections and corners keep their real times.</div>`:'';
     $('notes').innerHTML=badHtml+cautionHtml()+courseBanners(ids)+devNotes(ids)+l1h;$('pwrwrap').hidden=!(isLb()?ids.some(i=>RIDERS[i].M.hasPower):(CMP.A.M.hasPower&&CMP.B.M.hasPower));return;}
   const total=M.fin-M.rs;
   const sport=RAW.meta.sub===11?'cyclocross':(RAW.meta.name||'');
@@ -1488,8 +1771,9 @@ function renderHeader(){
   $('subtitle').textContent=`${date}${sport?' · '+sport:''} · ${NL} laps${M.partialEnd?' (last one partial)':''} · race time ${fmtT(total)} (${M.rs}s → ${M.fin}s into the file) · ≈ ${uLap(M.ftG[M.NG-1])}/lap`;
   let n='';
   if(M.laps[0].partial&&M.lapSum[0].adj==null)n+=`<div class="banner">Lap 1 starts away from the lap line, so it's a partial lap and is left out of the stats.</div>`;
-  if(M.partialEnd){const L=M.laps[NL-1];const short=Math.round(M.ftG[M.NG-1]-interp1(L.slast,M.G,M.ftG));
-    n+=L.toFinish?`<div class="banner">The finish is about ${uLen(short)} before the lap line, so lap ${NL}'s time is measured to the finish (slightly short of a full lap) and it isn't counted as your fastest lap.</div>`
+  if(M.partialEnd){const L=M.laps[NL-1],ls=M.lapSum[NL-1];const short=Math.round(M.ftG[M.NG-1]-interp1(L.slast,M.G,M.ftG));
+    n+=ls.adj!=null?`<div class="banner">The finish is about ${uLen(short)} before the lap line, so lap ${NL} is short of a full lap: ${fmtT(ls.time)} to the finish. For lap-time comparisons it counts as <b>≈${fmtT(ls.adj)}</b>, adding ${ls.diff[0].est.toFixed(0)} s, your median time from the finish to the lap line on the other laps. It isn't counted as your fastest lap.</div>`
+      :L.toFinish?`<div class="banner">The finish is about ${uLen(short)} before the lap line, so lap ${NL}'s time is measured to the finish (slightly short of a full lap) and it isn't counted as your fastest lap.</div>`
       :`<div class="banner">Your last lap ends at the finish about ${uLen(short)} before the lap line, so it's shown as a partial lap: its sections and corners count, but it has no lap time.</div>`;}
   if(M.lapSum[0].adj!=null)n+=`<div class="banner">${lap1Text(M)} Lap 1 is left out of the stats by default; tick "Count lap 1 in stats" to include it on the sections it shares with later laps.</div>`;
   else if(M.lapSum[0].shortcut){const a=adjustedLap(0);n+=`<div class="banner">Lap 1 used a different start route that skips part of the course, so the sections it skipped show "—". Its lap time is shown <b>adjusted</b>: ≈${fmtT(a.adj)} = your real lap 1 time on the sections you rode + your median time (${a.filled.toFixed(0)} s) on the ones you skipped (actual lap 1: ${fmtT(M.lapSum[0].time)}).</div>`;}
@@ -1510,10 +1794,10 @@ function renderWtRow(){
 }
 function renderTiles(){
   const st=allStats();const ideal=st.reduce((a,s)=>a+s.best,0);let h='';
-  M.lapSum.forEach((l,k)=>{const aj=l.shortcut?adjustedLap(k):null;const gap=(aj?aj.adj:l.time)-M.lapSum[bestLap].time;
-    const tag=l.toFinish?'to finish':l.partialEnd?'partial':l.adj!=null?'est.':l.shortcut?'short start route':k===0?(l.partial?'partial':'start'):'';
+  M.lapSum.forEach((l,k)=>{const fe=l.partialEnd&&l.adj!=null,aj=l.shortcut||fe?adjustedLap(k):null;const gap=(aj?aj.adj:l.time)-M.lapSum[bestLap].time;
+    const tag=fe?'est. full lap':l.toFinish?'to finish':l.partialEnd?'partial':l.adj!=null?'est.':l.shortcut?'short start route':k===0?(l.partial?'partial':'start'):'';
     h+=`<div class="tile${k===bestLap?' best':''}"><div class="k">${sw(k)} Lap ${k+1}${tag?` <span class="muted">(${tag})</span>`:''}${k===bestLap?' <span class="muted">fastest</span>':''}</div>
-    <div class="v">${aj?'≈'+fmtT(aj.adj):fmtT(l.time)}</div>${aj?`<div class="s">adjusted (actual ${fmtT(l.time)})</div>`:''}<div class="s">${k===bestLap?'—':isFinite(gap)?fmtD(gap):'no lap time'} · ${uSpd(l.v)}</div>
+    <div class="v">${aj?'≈'+fmtT(aj.adj):fmtT(l.time)}</div>${aj?`<div class="s">${fe?`${fmtT(l.time)} to the finish + ${aj.filled.toFixed(0)} s`:`adjusted (actual ${fmtT(l.time)})`}</div>`:''}<div class="s">${k===bestLap?'—':isFinite(gap)?fmtD(gap):'no lap time'} · ${uSpd(l.v)}</div>
     <div class="s">${M.hasPower?`${wkOn()?`${pwF(curR(),l.pw)} avg · ${pwF(curR(),l.np)} NP ${pwU()}`:`${l.pw} W avg · ${l.np} W NP`}`:'no power'}</div><div class="s">${M.hasPower?l.coast+'% coasting':''}${M.hasCad?' · '+l.cad+' rpm':''}</div>${state.showHR&&M.hasHR?`<div class="s">${l.hr!=null?l.hr+' bpm avg · '+l.hrmax+' max':'no heart rate'}</div>`:''}</div>`;});
   if(isFinite(ideal))h+=`<div class="tile"><div class="k">Ideal lap</div><div class="v">${fmtT(ideal)}</div><div class="s">best of each section${state.incl1?'':' (laps 2–'+NL+')'}</div><div class="s">${fmtD(ideal-M.lapSum[bestLap].time)} vs fastest lap</div></div>`;
   $('tiles').innerHTML=h;
@@ -1559,6 +1843,23 @@ function renderFindings(){
 
 /* =================== map =================== */
 let mapGeom=null;
+// Satellite imagery under the course map (off by default: the tiles come from Esri's servers, so it needs the internet and tells them roughly where
+// the course is). Web-map tiles are placed in the map's own metres; over a course-sized area the difference between the two projections is negligible.
+const SATKEY='cxLapAnalyzer.satellite';
+try{state.sat=localStorage.getItem(SATKEY)==='1';}catch(e){}
+function satTiles(Z,vw,vh,minx,maxy,pad,px,py,svg){if(!state.sat||!M)return '';
+  const mpp=vw/Math.max(200,svg.clientWidth||650),cl=Math.cos(M.lat0*Math.PI/180),z=Math.max(3,Math.min(19,Math.ceil(Math.log2(40075016*cl/(256*mpp)))));
+  const n=2**z,lx=lon=>(lon+180)/360*n,ly=la=>{const r=la*Math.PI/180;return (1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*n;};
+  const xl=x=>x/n*360-180,yl=y=>Math.atan(Math.sinh(Math.PI*(1-2*y/n)))*180/Math.PI,lon=x=>x/M.kx+M.lon0,lat=y=>y/M.ky+M.lat0;
+  const wx0=Z.vx+minx-pad,wy1=maxy+pad-Z.vy;
+  const tx0=Math.floor(lx(lon(wx0))),tx1=Math.floor(lx(lon(wx0+vw))),ty0=Math.floor(ly(lat(wy1))),ty1=Math.floor(ly(lat(wy1-vh)));
+  if((tx1-tx0+1)*(ty1-ty0+1)>100)return '';
+  let h='<g style="pointer-events:none">';
+  for(let tx=tx0;tx<=tx1;tx++)for(let ty=ty0;ty<=ty1;ty++){const X0=px((xl(tx)-M.lon0)*M.kx),X1=px((xl(tx+1)-M.lon0)*M.kx),Y0=py((yl(ty)-M.lat0)*M.ky),Y1=py((yl(ty+1)-M.lat0)*M.ky);
+    h+=`<image href="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${tx}" x="${X0.toFixed(2)}" y="${Y0.toFixed(2)}" width="${(X1-X0+0.3).toFixed(2)}" height="${(Y1-Y0+0.3).toFixed(2)}" preserveAspectRatio="none"/>`;}
+  return h+'</g>';}
+$('mappick').onclick=()=>{state.pickLine=true;state.editing=false;renderAll();};
+$('mapsat').onchange=e=>{state.sat=e.target.checked;try{localStorage.setItem(SATKEY,state.sat?'1':'0');}catch(_){}renderMap();};
 function renderMap(){
   const svg=$('map');const X=TR.gx,Y=TR.gy;
   const minx=Math.min(...X),maxx=Math.max(...X),miny=Math.min(...Y),maxy=Math.max(...Y);
@@ -1583,19 +1884,20 @@ function renderMap(){
     colorOf=i=>isFinite(d[i])?diverge(-d[i]/dm):css('--mid');
     legend=`<span>${esc(CMP.A.name)} faster</span><span class="bar" style="background:linear-gradient(90deg,${diverge(-1)},${diverge(0)},${diverge(1)})"></span><span>${esc(CMP.B.name)} faster (by up to ${dm.toFixed(1)} s, ${basisLabel()})</span>`;
     $('maplapwrap').style.display='none';}
-  $('maplegend').innerHTML=state.editing?'':legend;$('mapmode').disabled=state.editing||isMulti();$('mapmode').parentElement.style.display=isMulti()?'none':'';
+  $('maplegend').innerHTML=(state.editing?'':legend)+(state.sat?'<span class="muted">Satellite imagery © Esri, Maxar, Earthstar Geographics</span>':'');$('mapmode').disabled=state.editing||isMulti();$('mapmode').parentElement.style.display=isMulti()?'none':'';
   $('mapbanner').innerHTML=state.pickLine?'<div class="banner"><b>Pick the lap line:</b> click a point on the course you pass exactly once per lap. <button id="cancelpick">Cancel</button></div>':
     state.editing?(ED.tool==='draw'?'<div class="banner"><b>Drawing sections in order:</b> move or drag along the course and it lights up from the start dot to your cursor. Click or let go to end the section; the next one starts there. Scroll or use ← → to fine-tune. <b>Ctrl + scroll</b> zooms; drag empty space to pan.</div>':'<div class="banner"><b>Adjusting:</b> drag a round handle along the course to move that boundary. Click the course to add a new boundary. <b>Ctrl + scroll</b> zooms; drag empty space to pan.</div>'):'';
   if($('cancelpick'))$('cancelpick').onclick=()=>{state.pickLine=false;renderAll();};
   $('maphint').hidden=state.editing||state.pickLine;
-  let h='';const all=X.map((x,i)=>`${px(x).toFixed(1)},${py(Y[i]).toFixed(1)}`).join(' ');
+  $('mapsat').checked=!!state.sat;$('mappick').hidden=state.editing||state.pickLine;
+  let h=satTiles(Z,vw,vh,minx,maxy,pad,px,py,svg);const all=X.map((x,i)=>`${px(x).toFixed(1)},${py(Y[i]).toFixed(1)}`).join(' ');
   h+=`<polyline points="${all}" fill="none" stroke="var(--surface)" stroke-width="${11*K}" stroke-linejoin="round" stroke-linecap="round"/>`;
   if(state.editing){ // raw GPS tracks from every lap, faint, under the course line
     const pts=[];for(let i=M.rs;i<=M.fin;i+=1)pts.push(`${px(M.X[i]).toFixed(1)},${py(M.Y[i]).toFixed(1)}`);
     h+=`<polyline points="${pts.join(' ')}" fill="none" stroke="var(--ink2)" stroke-width="${1*K}" opacity="${state.mz.z>2?.6:.35}" stroke-linejoin="round" style="pointer-events:none"/>`;
     colorOf=i=>i%2?css('--muted'):css('--axis');}
   S.forEach((s,i)=>{const pts=[];for(let j=0;j<NX;j++)if(FT[j]>=s.ft0-1&&FT[j]<=s.ft1+1)pts.push(`${px(X[j]).toFixed(1)},${py(Y[j]).toFixed(1)}`);
-    const sel=state.sel===i;
+    const sel=selSet().includes(i);
     if(sel)h+=`<polyline points="${pts.join(' ')}" fill="none" stroke="var(--ink)" stroke-width="${12*K}" stroke-linejoin="round" stroke-linecap="round"/>`;
     h+=`<polyline points="${pts.join(' ')}" fill="none" stroke="${colorOf(i)}" stroke-width="${(sel?8:7)*K}" stroke-linejoin="round" stroke-linecap="round"/>`;
     h+=`<polyline class="msec" data-i="${i}" points="${pts.join(' ')}" fill="none" stroke="transparent" stroke-width="${(state.editing?13:18)*K}" style="cursor:${state.editing?'crosshair':'pointer'}"/>`;});
@@ -1622,7 +1924,7 @@ function renderMap(){
     el.onmouseleave=hideTip;});
   svg.querySelectorAll('.mcor').forEach(el=>{const j=+el.dataset.j,c=CR[j];
     el.onclick=ev=>{if(state.editing)return;if(state.pickLine){mapClick(ev);return;}selectCorner(j);};
-    el.onmousemove=ev=>{if(isMulti()){showTip(isLb()?lbCornerTip(j):cmpCornerTip(j),ev);return;}let r=`<b>Corner ${cTitle(c)}</b> · ${c.dir==='L'?'left':'right'} ${c.kind} (~${Math.abs(c.deg)}°) · in S${c.sec}<br>Min speed by lap:<br>`;
+    el.onmousemove=ev=>{if(isMulti()){showTip(isLb()?lbCornerTip(j):cmpCornerTip(j),ev);return;}let r=`<b>Corner ${cTitle(c)}</b> · ${cKind(c)} (~${Math.abs(c.deg)}°) · in ${esc(cSec(c))}<br>Min speed by lap:<br>`;
       c.laps.forEach((l,k)=>{if(l)r+=`${sw(k)} L${k+1} ${uSpd(l.vmin)} · ${l.t.toFixed(1)} s<br>`;});showTip(r,ev);};
     el.onmouseleave=hideTip;});
   svg.onclick=null;
@@ -1641,7 +1943,8 @@ function renderMap(){
     if(!state.editing)return;
     if(ED.lock){if(Math.hypot(ev.clientX-ED.lock.x,ev.clientY-ED.lock.y)<12)return;ED.lock=null;}
     const w=svgToWorld(ev);
-    if(ED.drag){const d=ED.drag,cuts=USER.cuts,lo=(d.ci>0?cuts[d.ci-1]:0)+8,hi=(d.ci<cuts.length-1?cuts[d.ci+1]:M.Lref)-8;const v=snapCourse(w,lo,hi,d.cur);if(v!=null){d.cur=v;updateDraw();}return;}
+    if(!ED.drag){const v=ED.hover==null?nearestS(w):snapCourse(w,-1,M.Lref+1,ED.hover);ED.hover=v;if(ED.tool==='adjust')updateDraw();}
+    if(ED.drag){const d=ED.drag;const v=snapCourse(w,-1,M.Lref+1,d.cur);if(v!=null){d.cur=Math.max(0,Math.min(M.Lref,v));updateDraw();}return;}
     if(ED.tool==='draw'&&ED.start!=null){const v=snapCourse(w,ED.start+4,M.Lref+1,ED.end==null?ED.start:ED.end);if(v!=null){ED.end=v;updateDraw();}}};
   svg.onpointerdown=ev=>{const t=ev.target;
     if(ev.pointerType==='touch'){TOUCH.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
@@ -1667,7 +1970,7 @@ function renderMap(){
       if(ED.tool==='draw'){if(ED.start!=null&&ED.end!=null)commitDraw();return;}
       const w=svgToWorld(ev);let bg=-1,bd=1e9;for(let g=0;g<M.NG;g++){const d=Math.hypot(M.gx[g]-w.x,M.gy[g]-w.y);if(d<bd){bd=d;bg=g;}}if(bd<25/state.mz.z+3)addCut(M.G[bg]);return;}
     if(!state.editing)return;
-    if(ED.drag){const d=ED.drag;ED.drag=null;if(Math.abs(d.cur-d.orig)>0.5){pushHist();const cuts=USER.cuts.slice();cuts[d.ci]=d.cur;setUser(cuts);saveUser();}renderAll();return;}
+    if(ED.drag){const d=ED.drag;ED.drag=null;if(Math.abs(d.cur-d.orig)>0.5)moveCut(d.ci,d.cur);renderAll();return;}
     if(ED.tool==='draw'){if(ED.down){ED.down=false;commitDraw();}return;}
     if(ev.target.dataset&&ev.target.dataset.cut!=null)return;
     const w=svgToWorld(ev);let bg=-1,bd=1e9;for(let g=0;g<M.NG;g++){const d=Math.hypot(M.gx[g]-w.x,M.gy[g]-w.y);if(d<bd){bd=d;bg=g;}}if(bd<25)addCut(M.G[bg]);};
@@ -1700,7 +2003,7 @@ function mapClick(ev){
   if(state.pickLine){
     // snap to nearest recorded point
     let bi=0,bd=1e9;for(let i=0;i<M.N;i++){const d=Math.hypot(M.X[i]-x,M.Y[i]-y);if(d<bd){bd=d;bi=i;}}
-    if(bd>30)return;COURSE.lapLine=M.toLL(M.X[bi],M.Y[bi]);COURSE.lapHeading=null;state.pickLine=false;run();renderSettings();return;
+    if(bd>30)return;COURSE.lapLine=M.toLL(M.X[bi],M.Y[bi]);COURSE.lapHeading=null;state.pickLine=false;run();saveLapLine();renderSettings();return;
   }
   let bg=-1,bd=1e9;for(let g=0;g<M.NG;g++){const d=Math.hypot(M.gx[g]-x,M.gy[g]-y);if(d<bd){bd=d;bg=g;}}
   if(bd<25)addCut(M.G[bg]);
@@ -1708,6 +2011,7 @@ function mapClick(ev){
 
 /* =================== detail / editor =================== */
 function renderDetail(){
+  if(!state.editing&&multiSel()){renderMultiDetail();return;}
   if(isLb()&&!state.editing){renderLbDetail();return;}
   if(state.view==='cmp'&&!state.editing){renderCmpDetail();return;}
   const el=$('detail');const inc=included();
@@ -1718,19 +2022,19 @@ function renderDetail(){
     if(draw&&ED.start!=null)status=`Drawing <b>S${drawingIndex()}</b>. Move or drag along the course (or the speed/gap chart) to pick where it ends; it lights up as you go. Click or let go to set it, and the next section starts right there. Boundaries you pass over are replaced.`;
     else if(draw&&ED.done)status='All sections drawn, all the way to the lap line. Restart to redo them, or switch to <b>Adjust</b> to fine-tune.';
     else if(draw)status='Drawing is paused. Click a round boundary handle on the map to continue from there, or restart from the lap line.';
-    else status='Drag a round handle along the course to move that boundary; the sections on both sides light up while you drag. Click the course to add a boundary. ✕ in the list removes one.';
+    else status='Click a section in the list to pick it: the map zooms to it and you can move its start and end. Or drag any round handle along the course; dragging it past the next boundary merges the section it passes. Click the course, or point and press <b>S</b>, to add a boundary. ✕ in the list removes one. "Draw in order" is for building sections from scratch.';
     let h=`<h2>My sections</h2>
       <div class="row-flex" style="margin:-4px 0 8px"><span class="seg"><button id="tool-draw" class="${draw?'on':''}">Draw in order</button><button id="tool-adj" class="${draw?'':'on'}">Adjust</button></span>
         <button id="ed-undo" ${ED.hist.length?'':'disabled'}>Undo</button>${draw?`<button id="ed-restart">Restart from the lap line</button>${ED.start!=null?'<button id="ed-finish">End this section at the lap line</button><button id="ed-pause">Pause</button>':''}`:''}</div>
       <p class="note" style="margin:0 0 6px">${status}</p>
-      ${draw?'<div class="banner" id="drawinfo" style="min-height:22px"></div><p class="hint" style="margin:-4px 0 8px">Scroll wheel or ← → fine-tune the end (hold Shift for bigger steps) · Enter sets it · Backspace undoes · Esc pauses</p>':'<div class="banner" id="drawinfo" style="min-height:22px">Drag a handle to see the two sections it separates.</div>'}
+      ${draw?'<div class="banner" id="drawinfo" style="min-height:22px"></div><p class="hint" style="margin:-4px 0 8px">Scroll wheel or ← → fine-tune the end (hold Shift for bigger steps) · Enter sets it · <b>S</b> splits where you point · Backspace undoes · Esc pauses · clicking a section in the list switches to Adjust</p>':'<div class="banner" id="drawinfo" style="min-height:22px">Drag a handle to see the two sections it separates.</div>'}
       <div class="scroll"><table class="ed"><tr><th class="l">#</th><th class="l">Name</th><th class="l">Mark as</th><th>Starts at</th><th>Typical</th><th></th></tr>`;
-    S.forEach((s,i)=>{h+=`<tr${draw&&ED.start!=null&&i===drawingIndex()-1?' style="outline:2px solid var(--ink2);outline-offset:-2px;border-radius:4px"':''}><td class="l"><b>S${s.id}</b></td><td class="l"><input type="text" data-i="${i}" value="${esc(s.baseName)}"></td><td class="l">${markSel(i,s.mark)}</td><td>${uLen(s.ft0)}</td><td>${fmt1(st[i].med)} s</td><td>${i>0?`<button data-rm="${i}" title="Remove this boundary">✕</button>`:''}</td></tr>`;});
+    S.forEach((s,i)=>{h+=`<tr data-es="${i}" title="Click to pick this section: the map zooms to it and you can move its start and end" style="cursor:pointer;${(draw?ED.start!=null&&i===drawingIndex()-1:ED.sel===i)?'outline:2px solid var(--ink2);outline-offset:-2px;border-radius:4px':''}"><td class="l"><b>S${s.id}</b></td><td class="l"><input type="text" data-i="${i}" value="${esc(s.baseName)}"></td><td class="l">${markSel(i,s.mark)}</td><td>${uLen(s.ft0)}</td><td>${fmt1(st[i].med)} s</td><td>${i>0?`<button data-rm="${i}" title="Remove this boundary">✕</button>`:''}</td></tr>`;});
     h+=`</table></div><div class="row-flex" style="margin-top:10px">
       <button class="primary" id="ed-done">Done</button><button id="ed-reset">Reset to automatic sections</button><button id="ed-clear">Clear all boundaries</button>
       <button id="ed-export">Export</button><button id="ed-import">Import</button></div>
-      <p class="hint">Saved automatically in this browser for this course. "Reset" replaces your sections with a copy of the automatic ones. "Automatic" and "Mine" at the top switch between the two sets without losing either.</p>`;
-    el.innerHTML=h;
+      <p class="hint">${SAVE_ON?'Saved automatically in this browser for this course (you can turn this off in Settings).':'Not saved in this browser (turned off in Settings): use Export, or Save report as HTML, to keep them.'} "Reset" replaces your sections with a copy of the automatic ones. "Automatic" and "Mine" at the top switch between the two sets without losing either.</p>`;
+    el.innerHTML=h;updateDraw(); // the status line above the list is filled in by the map's draw layer
     $('tool-draw').onclick=()=>{ED.tool='draw';if(ED.start==null&&!ED.done)ED.start=0;renderAll();};
     $('tool-adj').onclick=()=>{ED.tool='adjust';ED.end=null;renderAll();};
     $('ed-undo').onclick=undoEdit;
@@ -1739,6 +2043,7 @@ function renderDetail(){
     if($('ed-pause'))$('ed-pause').onclick=()=>{ED.start=null;ED.end=null;renderAll();};
     el.querySelectorAll('input[type=text]').forEach(inp=>inp.onchange=()=>{USER.names[+inp.dataset.i]=inp.value;saveUser();renderAll();});
     el.querySelectorAll('button[data-rm]').forEach(b=>b.onclick=()=>removeCut(+b.dataset.rm));
+    el.querySelectorAll('tr[data-es]').forEach(tr=>tr.onclick=ev=>{if(ev.target.closest('input,select,button'))return;editSelect(+tr.dataset.es);});
     el.querySelectorAll('select[data-mk]').forEach(sel=>sel.onchange=()=>setMark(+sel.dataset.mk,sel.value||null));
     el.querySelectorAll('input[type=text]').forEach(inp=>{inp.onkeydown=e=>e.stopPropagation();});
     $('ed-done').onclick=()=>{state.editing=false;renderAll();};
@@ -1765,7 +2070,7 @@ function renderDetail(){
   const cs=CR.filter(c=>c.sec===s.id);
   if(cs.length){h+=`<h3>Corners in this section — min speed (${spdU()})</h3><div class="scroll"><table><tr><th class="l">Corner</th>${M.lapSum.map((_,k)=>`<th>L${k+1}</th>`).join('')}</tr>`;
     cs.forEach(c=>{const v=c.laps.map(l=>l?l.vmin:NaN);const med=median(inc.filter(k=>c.laps[k]).map(k=>v[k]));
-      h+=`<tr class="row" data-j="${c.id-1}"><td class="l">${cTitle(c)} <span class="dim">${c.dir} ${c.kind}</span></td>${v.map((x,k)=>`<td style="background:${isNaN(x)?'':diverge(-(x-med)/2,true)}" class="${inc.includes(k)?'':'excl'}">${fmt1(cvS(x))}</td>`).join('')}</tr>`;});
+      h+=`<tr class="row" data-j="${c.id-1}"><td class="l">${cTitle(c)} ${cKindTag(c)}</td>${v.map((x,k)=>`<td style="background:${isNaN(x)?'':diverge(-(x-med)/2,true)}" class="${inc.includes(k)?'':'excl'}">${fmt1(cvS(x))}</td>`).join('')}</tr>`;});
     h+='</table></div>';}
   else h+='<p class="note">No rideable corners detected in this section.</p>';
   h+=`<p style="margin-top:10px"><button id="clearsel">Clear selection</button></p>`;
@@ -1781,12 +2086,14 @@ function renderHeat(){
   const st=allStats();const inc=included();
   let h=`<tr><th class="l">Section</th><th>Length</th>${M.lapSum.map((_,k)=>`<th>${sw(k)} L${k+1}</th>`).join('')}<th>Median</th><th>Best</th><th>SD</th><th>Range</th>${NL>=4?'<th>Trend/lap</th>':''}</tr>`;
   S.forEach((s,i)=>{const t=st[i];
-    h+=`<tr class="row${state.sel===i?' sel':''}" data-i="${i}"><td class="l"><b>S${s.id}</b> ${esc(s.name)}</td><td class="dim">${uLen(s.ft1-s.ft0)}</td>`;
+    h+=`<tr class="row${selSet().includes(i)?' sel':''}" data-i="${i}"><td class="l"><b>S${s.id}</b> ${esc(s.name)}</td><td class="dim">${uLen(s.ft1-s.ft0)}</td>`;
     s.laps.forEach((l,k)=>{if(!l){h+='<td class="muted">—</td>';return;}const isB=inc.includes(k)&&l.t===t.best;
       h+=`<td class="cell${inc.includes(k)?'':' excl'}" data-i="${i}" data-k="${k}" style="background:${diverge((l.t-t.med)/3,true)};${isB?'font-weight:700;':''}">${l.t.toFixed(1)}</td>`;});
     h+=`<td>${fmt1(t.med)}</td><td>${fmt1(t.best)} <span class="muted">L${t.bestK+1}</span></td><td>${t.sd.toFixed(1)}</td><td>${t.range.toFixed(1)}</td>`;
     if(NL>=4)h+=`<td style="color:${t.slope>0.25?'var(--bad)':t.slope<-0.25?'var(--good)':'var(--ink2)'}">${t.slope>0.25?'▲ ':t.slope<-0.25?'▼ ':''}${t.slope>=0?'+':'−'}${Math.abs(t.slope).toFixed(2)}</td>`;
     h+='</tr>';});
+  if(multiSel()){const ids=selSet(),tot=M.lapSum.map((_,k)=>ids.some(i=>!S[i].laps[k])?NaN:ids.reduce((a,i)=>a+S[i].laps[k].t,0)),ti=inc.map(k=>tot[k]).filter(isFinite),mt=median(ti),bt=Math.min(...ti);
+    h+=`<tr class="sel"><td class="l"><b>Selected</b> ${ids.map(i=>'S'+S[i].id).join(' + ')}</td><td class="dim">${uLen(ids.reduce((a,i)=>a+S[i].ft1-S[i].ft0,0))}</td>${tot.map((v,k)=>isFinite(v)?`<td class="${inc.includes(k)?'':'excl'}" style="background:${diverge((v-mt)/Math.max(3,ids.length),true)};${v===bt?'font-weight:700':''}">${v.toFixed(1)}</td>`:'<td class="muted">—</td>').join('')}<td>${fmt1(mt)}</td><td>${fmt1(bt)}</td><td>${ti.length>1?sd(ti).toFixed(1):''}</td><td>${ti.length>1?(Math.max(...ti)-bt).toFixed(1):''}</td>${NL>=4?'<td></td>':''}</tr>`;}
   const lt=M.lapSum.map(l=>l.time);
   h+=`<tr><td class="l"><b>Lap</b></td><td class="dim">${uLen(FTMAX)}</td>${lt.map((x,k)=>`<td style="font-weight:${k===bestLap?700:500}" title="${M.lapSum[k].shortcut?'actual time on the shorter start route; adjusted ≈ '+fmtT(adjustedLap(k).adj):''}">${M.lapSum[k].shortcut?'≈'+fmtT(adjustedLap(k).adj):fmtT(x)}</td>`).join('')}<td>${fmtT(median(inc.map(k=>lt[k])))}</td><td>${fmtT(st.reduce((a,s)=>a+s.best,0))} <span class="muted">ideal</span></td><td></td><td></td>${NL>=4?'<td></td>':''}</tr>`;
   const tb=$('heat');tb.innerHTML=h;
@@ -1809,7 +2116,7 @@ function lineChart(id,o){
   const pd=(hi-lo)*0.06||1;lo-=pd;hi+=pd;if(o.floor0)lo=Math.max(lo,0);
   const sx=v=>m.l+(v-x0)/(x1-x0)*(W-m.l-m.r),sy=v=>H-m.b-(v-lo)/(hi-lo)*(H-m.t-m.b);
   let h=`<defs><clipPath id="clip-${id}"><rect x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}"/></clipPath></defs>`;
-  if(state.sel!==null&&S[state.sel]){const s=S[state.sel];h+=`<rect x="${sx(Math.max(x0,s.ft0))}" y="${m.t}" width="${Math.max(0,sx(Math.min(x1,s.ft1))-sx(Math.max(x0,s.ft0)))}" height="${H-m.t-m.b}" fill="var(--wash)"/>`;}
+  selSet().forEach(si=>{const s=S[si];if(!s)return;h+=`<rect x="${sx(Math.max(x0,s.ft0))}" y="${m.t}" width="${Math.max(0,sx(Math.min(x1,s.ft1))-sx(Math.max(x0,s.ft0)))}" height="${H-m.t-m.b}" fill="var(--wash)"/>`;});
   niceTicks(lo,hi,o.yt||4).forEach(v=>{h+=`<line x1="${m.l}" x2="${W-m.r}" y1="${sy(v)}" y2="${sy(v)}" stroke="var(--grid)"/><text x="${m.l-6}" y="${sy(v)+3.5}" text-anchor="end">${o.yfmt(v)}</text>`;});
   if(o.zero)h+=`<line x1="${m.l}" x2="${W-m.r}" y1="${sy(0)}" y2="${sy(0)}" stroke="var(--axis)" stroke-width="1.5"/>`;
   S.forEach(s=>{if(s.ft0>x0&&s.ft0<x1)h+=`<line x1="${sx(s.ft0)}" x2="${sx(s.ft0)}" y1="${m.t}" y2="${H-m.b}" stroke="${state.editing?'var(--ink2)':'var(--grid)'}" stroke-dasharray="3 3"/>`;
@@ -1840,6 +2147,8 @@ function lineChart(id,o){
   ov.ondblclick=()=>{state.xr=null;renderCharts();};
 }
 function hoverAll(f,src,ev){
+  if(state.editing&&f!=null&&M)ED.hover=ftToS(FT[idxAtFt(f)]);
+  if(docked())dockHi(f==null?null:{ft:f});
   for(const id in charts){const c=charts[id],svg=$(id),xh=svg.querySelector('.xh'),dots=svg.querySelector('.dots');if(!xh)continue;
     if(f==null||f<c.x0||f>c.x1){xh.style.display='none';dots.innerHTML='';continue;}
     const i=idxAtFt(f),x=c.sx(FT[i]);xh.setAttribute('x1',x);xh.setAttribute('x2',x);xh.style.display='';
@@ -1859,16 +2168,15 @@ function baseTimes(){
 }
 // optional heart-rate chart (off by default): laps in single view, the two riders in Compare; only offered when the file(s) have heart-rate data
 function heartChart(){
-  const cmp=state.view==='cmp',lb=isLb(),ok=lb?okRiders().some(i=>RIDERS[i].M.hasHR):cmp?!!(CMP.A.M.hasHR&&CMP.B.M.hasHR):!!M.hasHR;
+  const cmp=state.view==='cmp',lb=isLb(),ok=lb||cmp?chartIds().some(i=>RIDERS[i].M.hasHR):!!M.hasHR;
   $('hrctl').hidden=!ok;$('showhr').checked=state.showHR;
   const on=ok&&state.showHR;$('hrwrap').hidden=!on;
   if(!on){delete charts.hr;return;}
   const f={h:200,yfmt:v=>Math.round(v),tfmt:v=>Math.round(v)+' bpm'};
-  if(lb){lineChart('hr',{...f,series:okRiders().filter(i=>RIDERS[i].M.hasHR).map(i=>({label:dn(RIDERS[i]),show:true,color:riderColor(i),w:2.2,y:riderTrace(RIDERS[i]).h}))});return;}
-  if(!cmp){lineChart('hr',{...f,series:TR.map((t,k)=>({lap:k,show:state.vis[k],color:lapColor(k),w:1.5,y:t.h}))});return;}
-  const {A,B,a,b}=CMP,ta=riderTrace(A),tb=riderTrace(B),ca=riderColor(a),cb=riderColor(b);
-  const faint=(r,col)=>state.cmpLaps?incFor(r.M).map(k=>({show:true,nohover:true,color:col,w:1,op:.25,y:r.TR[k].h})):[];
-  lineChart('hr',{...f,series:[...faint(A,ca),...faint(B,cb),{label:A.name,show:true,color:ca,w:2.5,y:ta.h},{label:B.name,show:true,color:cb,w:2.5,y:tb.h}]});
+  if(!cmp&&!lb){lineChart('hr',{...f,series:TR.map((t,k)=>({lap:k,show:state.vis[k],color:lapColor(k),w:1.5,y:t.h}))});return;}
+  const hs=chartIds().filter(i=>RIDERS[i].M.hasHR),op=hs.length>2?.18:.25;
+  const faint=i=>state.cmpLaps?incFor(RIDERS[i].M).map(k=>({show:true,nohover:true,color:riderColor(i),w:1,op,y:RIDERS[i].TR[k].h})):[];
+  lineChart('hr',{...f,series:[...hs.flatMap(faint),...hs.map(i=>({label:dn(RIDERS[i]),show:true,color:riderColor(i),w:2.5,y:riderTrace(RIDERS[i]).h}))]});
 }
 $('showhr').onchange=e=>{state.showHR=e.target.checked;renderAll();};
 function renderCharts(){
@@ -1923,10 +2231,10 @@ function renderCornerReport(){
   svg.innerHTML=h;
   svg.querySelectorAll('.cb').forEach(el=>{const j=+el.dataset.j;const r=rows.find(q=>q.j===j);
     el.onclick=()=>{selectCorner(j);$('mapcard').scrollIntoView({behavior:'smooth',block:'center'});};
-    el.onmousemove=ev=>{if(!r)return;showTip(`<b>${cTitle(CR[j])}</b> · ${CR[j].dir==='L'?'left':'right'} ${CR[j].kind} · S${CR[j].sec}<br>Time left: <b>${r.pot.toFixed(1)} s</b> over ${r.L.length} laps<br>Best pass: lap ${r.bk+1} (${r.best.toFixed(1)} s) · slowest: lap ${r.wk+1} (${r.worst.toFixed(1)} s)`,ev);};
+    el.onmousemove=ev=>{if(!r)return;showTip(`<b>${cTitle(CR[j])}</b>${CR[j].cname?` · ${cKind(CR[j])}`:''}<br><span class="muted">${esc(cSec(CR[j]))}</span><br>Time left: <b>${r.pot.toFixed(1)} s</b> over ${r.L.length} laps<br>Best pass: lap ${r.bk+1} (${r.best.toFixed(1)} s) · slowest: lap ${r.wk+1} (${r.worst.toFixed(1)} s)`,ev);};
     el.onmouseleave=hideTip;});
   // lists
-  const link=r=>`<a class="sec" data-j="${r.j}">${cTitle(r.c)}</a> <span class="dim">(${r.c.dir==='L'?'left':'right'} ${r.c.kind}, S${r.c.sec} ${esc(S[r.c.sec-1].name)})</span>`;
+  const link=r=>`<a class="sec" data-j="${r.j}">${cTitle(r.c)}</a> <span class="dim">(${r.c.cname?cKind(r.c)+', ':''}${esc(cSec(r.c))})</span>`;
   const work=[...rows].sort((a,b)=>b.pot-a.pot).slice(0,6);
   let h1='<div><h3 style="margin-top:0">Corners to work on</h3><ol>';
   work.forEach(r=>{const why=[];
@@ -1953,7 +2261,7 @@ function renderCorners(){
   let h=`<tr><th class="l">Corner</th><th class="l">Section</th><th>At</th>${M.lapSum.map((_,k)=>`<th>${sw(k)} L${k+1}</th>`).join('')}<th>Median</th><th>Best lap</th><th>Spread</th></tr>`;
   CR.forEach((c,j)=>{const v=c.laps.map(l=>l?l[mtr]:NaN);const L=inc.filter(k=>c.laps[k]);if(!L.length)return;const iv=L.map(k=>v[k]);const med=median(iv);
     const best=lowerBetter?Math.min(...iv):Math.max(...iv),bk=L[iv.indexOf(best)];
-    h+=`<tr class="row${state.corner===j?' sel':''}" data-j="${j}"><td class="l"><b>C${c.id}</b> <input type="text" class="cname" data-j="${j}" value="${esc(c.cname||'')}" placeholder="${c.dir==='L'?'left':'right'} ${c.kind}" title="Type a name for this corner (saved for this course)"></td><td class="l dim">S${c.sec}</td><td class="dim">${uLen(c.ft)}</td>`;
+    h+=`<tr class="row${state.corner===j?' sel':''}" data-j="${j}"><td class="l"><b>C${c.id}</b> <input type="text" class="cname" data-j="${j}" value="${esc(c.cname||'')}" placeholder="${esc(cAuto(c))}" title="Type a name for this corner (saved for this course). Until you do, it is named after its section."></td><td class="l dim">${esc(cSec(c))}</td><td class="dim">${uLen(c.ft)}</td>`;
     v.forEach((x,k)=>{if(isNaN(x)){h+='<td class="muted">—</td>';return;}const d=(x-med)/scale*(lowerBetter?1:-1);h+=`<td class="${inc.includes(k)?'':'excl'}" style="background:${diverge(d,true)}">${disp(x)}</td>`;});
     h+=`<td>${disp(med)} <span class="muted">${unit}</span></td><td>L${bk+1}</td><td>${mtr==='pexit'?((Math.max(...iv)-Math.min(...iv))/kgv).toFixed(wk?2:0):mtr==='t'?(Math.max(...iv)-Math.min(...iv)).toFixed(1):fmtN(cvS(Math.max(...iv)-Math.min(...iv)))}</td></tr>`;});
   const tb=$('ctab');tb.innerHTML=h;
@@ -2082,18 +2390,81 @@ ${RIDERS.length>1?`<p>With several riders, ${esc(RIDERS[PRIMARY].name)} is the c
 let CMP=null;
 function renderAll(){
   if(!RIDERS.length||!RIDERS[PRIMARY]||!RIDERS[PRIMARY].M)return;
+  layoutDock();
   const cmp=state.view==='cmp',multi=isMulti();
   const rk=[state.view,PRIMARY,RIDERS.length,state.editing?1:0].join();if(RP.key!==rk){rpReset();RP.key=rk;}
   activate(multi?PRIMARY:state.view);
   buildSections(currentSet());
+  state.sels=state.sel==null?[]:(state.sels||[]).filter(i=>i<S.length);if(state.sels.length<2)state.sels=[];
   if(isLb()){const mx=Math.min(...okRiders().map(i=>RIDERS[i].M.nl));if(typeof state.cmp.basis==='number'&&state.cmp.basis>mx)state.cmp.basis='typ';LB=buildLb();}
   if(cmp){const A=RIDERS[state.cmp.a],B=RIDERS[state.cmp.b];CMP={A,B,a:state.cmp.a,b:state.cmp.b,sa:computeSections(A.M,currentSet()),sb:computeSections(B.M,currentSet())};}
   buildControls();renderHeader();renderExportPanel();
   if(isLb()){renderLbHead();renderLbFind();renderMap();renderDetail();renderLbSections();renderCharts();renderLbCorners();renderCmpLaps();renderMethod();}
   else if(cmp){renderCmpHead();renderCmpFindings();renderMap();renderDetail();renderCmpSections();renderCharts();renderCmpCorners();renderCmpOff();renderCmpLaps();renderMethod();}
   else{renderWtRow();renderTiles();renderFindings();renderMap();renderDetail();renderHeat();renderCharts();renderCornerReport();renderCorners();renderOffBike();renderMethod();}
-  rpUI();
+  rpUI();renderDock();renderSaveSetting();
 }
+
+/* =================== side panel (wide screens) =================== */
+// With room to spare beside the report (a maximised window on a wide screen), a panel on the right keeps your lap times and a small course map in view
+// once you have scrolled past the Laps card and the main map. Hovering a section, a corner or a point on a chart lights it up on that map.
+// On a narrower window there is no panel and the report keeps its full width.
+const DOCK_W=360,DOCK_MIN=1500;let DH=null,DG=null,dvRaf=0;
+const docked=()=>document.body.classList.contains('docked');
+function layoutDock(){const cw=document.documentElement.clientWidth,on=cw>=DOCK_MIN&&reportOpen(),b=document.body,was=docked();
+  b.classList.toggle('docked',on);$('dock').hidden=!on;
+  if(on){const mw=Math.min(1280,cw-DOCK_W-48),side=Math.max(16,(cw-mw-DOCK_W-16)/2);b.style.setProperty('--mainw',mw+'px');b.style.setProperty('--side',side+'px');$('dock').style.right=side+'px';}
+  return was!==on;}
+// each part of the panel shows once its full-size version has scrolled up out of view
+function dockVis(){if(!docked()||!M)return;const past=el=>!!el&&el.getClientRects().length>0&&el.getBoundingClientRect().bottom<40;
+  $('docklaps').hidden=isMulti()||!past($('tiles').closest('.card'));$('dockmapcard').hidden=!past($('mapcard'));}
+addEventListener('scroll',()=>{if(!dvRaf)dvRaf=requestAnimationFrame(()=>{dvRaf=0;dockVis();});},{passive:true});
+function renderDock(){if(!docked()||!M)return;
+  if(!isMulti()){const bt=lapTimeFor(bestLap);let h='<h3>Laps</h3><table class="docktab">';
+    M.lapSum.forEach((l,k)=>{const t=lapTimeFor(k),est=l.adj!=null||l.shortcut;
+      h+=`<tr class="${k===bestLap?'best':''}"><td class="l">${sw(k)} Lap ${k+1}</td><td>${isFinite(t)?(est?'≈':'')+fmtT(t):'—'}</td><td class="dim">${k===bestLap?'fastest':isFinite(t)?fmtD(t-bt):''}</td>${M.hasPower?`<td class="dim">${M.hasPower&&wkOn()?pwF(curR(),l.pw)+' '+pwU():l.pw+' W'}</td>`:''}</tr>`;});
+    $('docklaps').innerHTML=h+'</table>';}
+  const X=TR.gx,Y=TR.gy,minx=Math.min(...X),maxx=Math.max(...X),miny=Math.min(...Y),maxy=Math.max(...Y),pad=20,W=maxx-minx+2*pad,H=maxy-miny+2*pad,K=Math.max(W,H)/330;
+  const px=x=>x-minx+pad,py=y=>maxy-y+pad;DG={px,py,K};
+  const pl=(a,b)=>{const p=[];for(let j=0;j<NX;j++)if(FT[j]>=a-1&&FT[j]<=b+1)p.push(`${px(X[j]).toFixed(1)},${py(Y[j]).toFixed(1)}`);return p.join(' ');};
+  const svg=$('dockmap');svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  let h=`<polyline points="${pl(0,FTMAX)}" fill="none" stroke="var(--axis)" stroke-width="${5*K}" stroke-linejoin="round" stroke-linecap="round"/>`;
+  selSet().forEach(si=>{if(S[si])h+=`<polyline points="${pl(S[si].ft0,S[si].ft1)}" fill="none" stroke="var(--ink2)" stroke-width="${5*K}" stroke-linejoin="round" stroke-linecap="round" opacity=".55"/>`;});
+  S.forEach((s,i)=>{if(i===0)return;const j=idxAtFt(s.ft0);h+=`<circle cx="${px(X[j])}" cy="${py(Y[j])}" r="${2.4*K}" fill="var(--surface)" stroke="var(--ink2)" stroke-width="${K}"/>`;});
+  CR.forEach((c,j)=>{const q=idxAtFt(c.ft),sel=state.corner===j;h+=`<circle cx="${px(X[q])}" cy="${py(Y[q])}" r="${(sel?4.5:1.8)*K}" fill="${sel?'var(--ink)':'var(--muted)'}"/>`;});
+  h+=`<rect x="${px(X[0])-2*K}" y="${py(Y[0])-6*K}" width="${4*K}" height="${12*K}" fill="var(--ink)"/><g id="dockhi"></g>`;
+  svg.innerHTML=h;svg.style.cursor='pointer';
+  // what is under the pointer on this map: a corner (within ~12 px) or else a section (within ~20 px of the course line)
+  const under=ev=>{const pt=svg.createSVGPoint();pt.x=ev.clientX;pt.y=ev.clientY;const p=pt.matrixTransform(svg.getScreenCTM().inverse()),wx=p.x-pad+minx,wy=maxy-(p.y-pad);
+    const pxm=svg.getBoundingClientRect().width/W;let bj=-1,bd=1e9;CR.forEach((c,j)=>{const q=idxAtFt(c.ft),d=Math.hypot(X[q]-wx,Y[q]-wy);if(d<bd){bd=d;bj=j;}});
+    if(bj>=0&&bd*pxm<12)return {cor:bj};let bq=-1,bq2=1e9;for(let q=0;q<NX;q++){const d=Math.hypot(X[q]-wx,Y[q]-wy);if(d<bq2){bq2=d;bq=q;}}
+    return bq>=0&&bq2*pxm<20?{sec:secAtS(ftToS(FT[bq]))}:null;};
+  svg.onmousemove=ev=>dockHi(under(ev));svg.onmouseleave=()=>dockHi(null);
+  svg.onclick=ev=>{const o=under(ev);if(!o)return;const tab=tableInView();if(o.cor!=null)selectCorner(o.cor);else selectSection(o.sec);if(tab)scrollToPicked(tab,o);};
+  dockHi(DH);dockVis();}
+// After a click on the side-panel map: if you were looking at a section or corner table, bring the picked row into view (near the top of the screen)
+// when it is off screen. A corner picked while looking at a section table shows its section's row; a section picked in a corner table, its first corner.
+const PICK_TABLES=[['heat','sec'],['ctab','cor'],['cmpsec','sec'],['lbsec','sec'],['cmpcorners','cor'],['lbcorners','cor']];
+function tableInView(){const mid=innerHeight/2,vis=PICK_TABLES.filter(([id])=>{const e=$(id);if(!e||!e.getClientRects().length)return false;const r=e.getBoundingClientRect();return r.bottom>60&&r.top<innerHeight-60;});
+  return vis.find(([id])=>{const r=$(id).getBoundingClientRect();return r.top<=mid&&r.bottom>=mid;})||vis[0]||null;}
+function scrollToPicked([id,kind],o){const el=$(id);if(!el)return;let row=null;
+  if(kind==='sec'){const i=o.sec!=null?o.sec:CR[o.cor]?CR[o.cor].sec-1:-1;row=el.querySelector(`tr.row[data-i="${i}"]`);}
+  else{const j=o.cor!=null?o.cor:CR.findIndex(c=>c.sec-1===o.sec);row=j>=0?el.querySelector(`tr.row[data-j="${j}"]`):null;}
+  if(!row)return;const r=row.getBoundingClientRect();if(r.top<70||r.bottom>innerHeight-20)scrollTo({top:Math.max(0,scrollY+r.top-90),behavior:'smooth'});}
+// light up a section ({sec}), a corner ({cor}) or a point on the lap ({ft}, from the line charts) on the panel's map; null clears it
+function dockHi(o){DH=o;const g=$('dockhi');if(!g||!DG||!M)return;const {px,py,K}=DG,X=TR.gx,Y=TR.gy;let h='',cap='';
+  if(o&&o.sec!=null&&S[o.sec]){const s=S[o.sec],p=[];for(let j=0;j<NX;j++)if(FT[j]>=s.ft0-1&&FT[j]<=s.ft1+1)p.push(`${px(X[j]).toFixed(1)},${py(Y[j]).toFixed(1)}`);
+    h=`<polyline points="${p.join(' ')}" fill="none" stroke="var(--ink)" stroke-width="${7*K}" stroke-linejoin="round" stroke-linecap="round"/>`;cap=`<b>${esc(secName(o.sec))}</b>`;}
+  else if(o&&o.cor!=null&&CR[o.cor]){const c=CR[o.cor],j=idxAtFt(c.ft);
+    h=`<circle cx="${px(X[j])}" cy="${py(Y[j])}" r="${10*K}" fill="none" stroke="var(--ink)" stroke-width="${3*K}"/><circle cx="${px(X[j])}" cy="${py(Y[j])}" r="${3.5*K}" fill="var(--ink)"/>`;cap=`<b>${esc(cText(c))}</b>`;}
+  else if(o&&o.ft!=null){const j=idxAtFt(o.ft);h=`<circle cx="${px(X[j])}" cy="${py(Y[j])}" r="${6.5*K}" fill="var(--ink)" stroke="var(--surface)" stroke-width="${2.5*K}"/>`;cap=`${uLen(FT[j])} · ${esc(secName(secAtS(ftToS(FT[j]))))}`;}
+  else cap=multiSel()?`<span class="muted">Picked: ${selSet().map(i=>'S'+S[i].id).join(', ')}</span>`:state.corner!=null&&CR[state.corner]?`<span class="muted">Picked: ${esc(cText(CR[state.corner]))}</span>`:state.sel!=null&&S[state.sel]?`<span class="muted">Picked: ${esc(secName(state.sel))}</span>`:'<span class="muted">Hover a section, a corner or a chart to see where it is. Click this map to pick a section or a corner.</span>';
+  g.innerHTML=h;$('dockcap').innerHTML=cap;}
+// what is under the pointer anywhere in the report (except the main map): a corner, a section, or nothing
+$('report').addEventListener('mouseover',ev=>{if(!docked())return;const t=ev.target;if(!t.closest||t.closest('#map'))return;let e;
+  const o=(e=t.closest('a[data-cor]'))?{cor:+e.dataset.cor}:(e=t.closest('a[data-sec]'))?{sec:+e.dataset.sec}:(e=t.closest('.cb[data-j],tr.row[data-j],a.sec[data-j]'))?{cor:+e.dataset.j}:(e=t.closest('td.cell[data-i],tr.row[data-i]'))?{sec:+e.dataset.i}:null;
+  if(!o&&t.classList&&t.classList.contains('ov'))return; // a line chart: its own hover places the dot
+  dockHi(o);});
 
 /* =================== CSV export =================== */
 const csvCell=v=>{if(v==null)return '';const s=String(v);return /[",\r\n]/.test(s)||/^\s|\s$/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
@@ -2115,7 +2486,7 @@ function csvLaps(r){const Mr=r.M;
   const hr=state.showHR&&Mr.hasHR,pu=wkOn()&&kgOf(r)>0?'W/kg':'W';
   const rows=[['Lap','Time (s)','Time (m:ss.s)',`Average speed (${spdU()})`,`Average power (${pu})`,`Normalized power (${pu})`,'Coasting (%)','Cadence (rpm)',...(hr?['Average heart rate (bpm)','Max heart rate (bpm)']:[]),'Note','Estimated regular-course time (s)']];
   Mr.lapSum.forEach((l,k)=>rows.push([k+1,cf(l.time),isFinite(l.time)?fmtT(l.time):'',cf(cvS(l.v)),Mr.hasPower?pwC(r,l.pw):'',Mr.hasPower?pwC(r,l.np):'',Mr.hasPower?l.coast:'',Mr.hasCad?l.cad:'',...(hr?[l.hr==null?'':l.hr,l.hrmax==null?'':l.hrmax]:[]),
-    [l.toFinish?'timed to the finish':l.partialEnd?'partial last lap':'',l.partial?'partial first lap':'',l.adj!=null?'different route; estimated time in the last column':l.shortcut?'short start route':'',k===r.bestLap?'fastest lap':''].filter(Boolean).join('; '),l.adj!=null?cf(l.adj):'']));
+    [l.toFinish?'timed to the finish':l.partialEnd?(l.adj!=null?'finish before the lap line: time to the finish; estimated full lap in the last column':'partial last lap'):'',l.partial?'partial first lap':'',l.adj!=null&&!l.partialEnd?'different route or start; estimated time in the last column':l.shortcut?'short start route':'',k===r.bestLap?'fastest lap':''].filter(Boolean).join('; '),l.adj!=null?cf(l.adj):'']));
   return rows;}
 function csvSecCmp(){const {A,B,sa,sb}=CMP,pwc=A.M.hasPower&&B.M.hasPower,bl=basisLabel();
   const best=(r,secs,i)=>{const L=secs[i].laps,v=incFor(r.M).filter(k=>L[k]).map(k=>L[k].t);return v.length?Math.min(...v):NaN;};
@@ -2291,14 +2662,40 @@ function renderCmpFindings(){
   el.querySelectorAll('a[data-sec]').forEach(x=>x.onclick=()=>{selectSection(+x.dataset.sec);$('mapcard').scrollIntoView({behavior:'smooth',block:'center'});});
   el.querySelectorAll('a[data-cor]').forEach(x=>x.onclick=()=>{selectCorner(+x.dataset.cor);$('mapcard').scrollIntoView({behavior:'smooth',block:'center'});});
 }
+// several sections picked: their times added up, lap by lap (one rider) or rider by rider (Compare / Leaderboard), with each section's own time
+function renderMultiDetail(){
+  const el=$('detail'),ids=selSet(),secs=ids.map(i=>S[i]),len=secs.reduce((a,s)=>a+s.ft1-s.ft0,0),sum=a=>a.some(v=>!isFinite(v))?NaN:a.reduce((x,y)=>x+y,0);
+  let h=`<h2>${ids.length} sections together</h2><p class="note" style="margin-top:-6px">${secs.map(s=>`S${s.id}`).join(', ')} · ${uLen(len)} in all · times added up. <b>Ctrl + click</b> (⌘ + click on a Mac) a section on the map or in a table to add or remove it.</p>`;
+  if(isLb()){const rid=LB.ids,tot=rid.map((id,ri)=>sum(ids.map(i=>LB.val[ri][i]))),bt=Math.min(...tot.filter(isFinite));
+    h+=`<div class="scroll"><table class="lbt"><tr><th class="l">Section</th>${rid.map(i=>`<th class="rh">${lbName(i)}</th>`).join('')}</tr>`;
+    ids.forEach(i=>{h+=`<tr class="row" data-i="${i}"><td class="l"><b>S${S[i].id}</b> ${esc(S[i].name)}</td>${rid.map((id,ri)=>{const v=LB.val[ri][i];return `<td class="${LB.wins[i].includes(ri)?'lbbest':''}">${isFinite(v)?v.toFixed(1):'—'}</td>`;}).join('')}</tr>`;});
+    h+=`<tr><td class="l"><b>Together (${basisLabel()})</b></td>${tot.map(v=>`<td class="${v===bt?'lbbest':''}" style="font-weight:700;background:${isFinite(v)&&v!==bt?shade01((v-bt)/Math.max(1.2,.05*bt)):''}">${isFinite(v)?v.toFixed(1):'—'}</td>`).join('')}</tr></table></div>`;}
+  else if(state.view==='cmp'){const {A,B,a,b,sa,sb}=CMP,an=esc(dn(A)),bn=esc(dn(B)),lapRows=Math.max(A.M.nl,B.M.nl);
+    const ta=sum(ids.map(i=>secVal(A,sa,i))),tb=sum(ids.map(i=>secVal(B,sb,i)));
+    h+=`<p class="note">${basisLabel()} together: ${an} ${fmt1(ta)} s, ${bn} ${fmt1(tb)} s${isFinite(ta-tb)?` → <b>${esc(tb>ta?dn(A):dn(B))}</b> faster by ${Math.abs(tb-ta).toFixed(1)} s`:''}</p>
+      <div class="scroll"><table><tr><th class="l">Lap</th><th>${swc(riderColor(a))} ${an}</th><th>${swc(riderColor(b))} ${bn}</th><th>Δ</th></tr>`;
+    for(let k=0;k<lapRows;k++){const x=sum(ids.map(i=>sa[i].laps[k]?sa[i].laps[k].t:NaN)),y=sum(ids.map(i=>sb[i].laps[k]?sb[i].laps[k].t:NaN)),dd=y-x;
+      h+=`<tr><td class="l">L${k+1}</td><td>${fmt1(x)}</td><td>${fmt1(y)}</td><td style="background:${dcol(dd,4)}">${isFinite(dd)?fmtD(dd):'—'}</td></tr>`;}
+    h+=`</table></div><h3>Each section (${basisLabel()})</h3><div class="scroll"><table><tr><th class="l">Section</th><th>${an}</th><th>${bn}</th><th>Δ</th></tr>`;
+    ids.forEach(i=>{const x=secVal(A,sa,i),y=secVal(B,sb,i);h+=`<tr class="row" data-i="${i}"><td class="l"><b>S${S[i].id}</b> ${esc(S[i].name)}</td><td>${fmt1(x)}</td><td>${fmt1(y)}</td><td style="background:${dcol(y-x,2)}">${isFinite(y-x)?fmtD(y-x):'—'}</td></tr>`;});
+    h+='</table></div>';}
+  else{const inc=included(),med=ids.map(i=>median(inc.filter(k=>S[i].laps[k]).map(k=>S[i].laps[k].t)));
+    const tot=M.lapSum.map((_,k)=>sum(ids.map(i=>S[i].laps[k]?S[i].laps[k].t:NaN))),ti=inc.map(k=>tot[k]).filter(isFinite),mt=median(ti),bt=Math.min(...ti);
+    h+=`<div class="scroll"><table><tr><th class="l">Lap</th>${secs.map(s=>`<th>S${s.id}</th>`).join('')}<th>Together</th><th>vs median</th></tr>`;
+    M.lapSum.forEach((_,k)=>{const ex=!inc.includes(k);h+=`<tr><td class="l">${sw(k)} L${k+1}</td>${ids.map((i,q)=>{const l=S[i].laps[k];return l?`<td class="${ex?'excl':''}" style="background:${diverge((l.t-med[q])/3,true)}">${l.t.toFixed(1)}</td>`:'<td class="muted">—</td>';}).join('')}
+      <td class="${ex?'excl':''}" style="font-weight:${tot[k]===bt?700:600};background:${diverge((tot[k]-mt)/Math.max(3,ids.length),true)}">${fmt1(tot[k])}</td><td class="dim">${isFinite(tot[k]-mt)?fmtD(tot[k]-mt):'—'}</td></tr>`;});
+    h+=`<tr><td class="l"><b>Median</b></td>${med.map(v=>`<td>${fmt1(v)}</td>`).join('')}<td><b>${fmt1(mt)}</b></td><td></td></tr></table></div><p class="hint">Bold = your quickest lap over these sections together${ti.length?` (${fmt1(bt)} s, ${fmtD(bt-mt)} vs median)`:''}. Faded laps are left out of the stats.</p>`;}
+  h+=`<p style="margin-top:10px"><button id="clearsel">Clear selection</button></p>`;
+  el.innerHTML=h;el.querySelectorAll('tr.row[data-i]').forEach(r=>r.onclick=()=>selectSection(+r.dataset.i));$('clearsel').onclick=clearSel;
+}
 function renderCmpDetail(){
   const el=$('detail'),{A,B,a,b,sa,sb}=CMP,an=esc(dn(A)),bn=esc(dn(B));
-  const lapRows=Math.max(A.M.nl,B.M.nl);const lt=(r,k)=>{const l=r.M.lapSum[k];if(!l)return '—';return lapCell(l)+(l.partialEnd&&!l.toFinish?'*':'');};
+  const lapRows=Math.max(A.M.nl,B.M.nl);const lt=(r,k)=>{const l=r.M.lapSum[k];if(!l)return '—';return lapCell(l)+(l.partialEnd&&!l.toFinish&&l.adj==null?'*':'');};
   if(state.sel===null){
     let h=`<h2>Lap times</h2><div class="scroll"><table><tr><th class="l">Lap</th><th>${swc(riderColor(a))} ${an}</th><th>${swc(riderColor(b))} ${bn}</th><th>Δ</th></tr>`;
     for(let k=0;k<lapRows;k++){const ta=A.M.lapSum[k],tb=B.M.lapSum[k];const dd=cmpT(tb)-cmpT(ta);
       h+=`<tr><td class="l">L${k+1}</td><td>${lt(A,k)}</td><td>${lt(B,k)}</td><td style="background:${dcol(dd,10)}">${isFinite(dd)?fmtD(dd):'—'}</td></tr>`;}
-    h+=`</table></div><p class="hint">Δ = ${bn} minus ${an}: blue = ${an} faster, red = ${bn} faster. ≈ = start lap: an estimated regular-course time when lap 1 took a different route (hover for the actual time), otherwise a standing-start or partial lap.</p><h3>Pick a section</h3><p class="note">Click a section on the map or a row in the table to compare it lap by lap.</p>`;
+    h+=`</table></div><p class="hint">Δ = ${bn} minus ${an}: blue = ${an} faster, red = ${bn} faster. ≈ = start lap: an estimated regular-course time when lap 1 took a different route (hover for the actual time), otherwise a standing-start or partial lap; on a last lap that ends before the lap line, an estimated full lap.</p><h3>Pick a section</h3><p class="note">Click a section on the map or a row in the table to compare it lap by lap.</p>`;
     el.innerHTML=h;return;}
   const i=state.sel,s=S[i],va=secVal(A,sa,i),vb=secVal(B,sb,i);
   let h=`<h2>${esc(secName(i))}</h2><p class="note" style="margin-top:-6px">${uLen(s.ft1-s.ft0)} · ${basisLabel()}: ${an} ${fmt1(va)} s, ${bn} ${fmt1(vb)} s${isFinite(va-vb)?` → <b>${esc(vb>va?dn(A):dn(B))}</b> faster by ${Math.abs(vb-va).toFixed(1)} s`:''}</p>
@@ -2308,7 +2705,7 @@ function renderCmpDetail(){
   h+='</table></div>';
   const cs=CR.map((c,j)=>({c,j})).filter(o=>o.c.sec===s.id);
   if(cs.length){h+=`<h3>Corners in this section (${basisLabel()})</h3><div class="scroll"><table><tr><th class="l">Corner</th><th>Apex ${spdU()} A / B</th><th>Time A / B</th><th>Δ</th></tr>`;
-    cs.forEach(({c,j})=>{const ta=cornerVal(A,j,'t'),tb=cornerVal(B,j,'t');h+=`<tr class="row" data-j="${j}"><td class="l">${cTitle(c)} <span class="dim">${c.dir} ${c.kind}</span></td><td>${fmt1(cvS(cornerVal(A,j,'vmin')))} / ${fmt1(cvS(cornerVal(B,j,'vmin')))}</td><td>${fmt1(ta)} / ${fmt1(tb)}</td><td style="background:${dcol(tb-ta,1.5)}">${isFinite(tb-ta)?fmtD(tb-ta):'—'}</td></tr>`;});
+    cs.forEach(({c,j})=>{const ta=cornerVal(A,j,'t'),tb=cornerVal(B,j,'t');h+=`<tr class="row" data-j="${j}"><td class="l">${cTitle(c)} ${cKindTag(c)}</td><td>${fmt1(cvS(cornerVal(A,j,'vmin')))} / ${fmt1(cvS(cornerVal(B,j,'vmin')))}</td><td>${fmt1(ta)} / ${fmt1(tb)}</td><td style="background:${dcol(tb-ta,1.5)}">${isFinite(tb-ta)?fmtD(tb-ta):'—'}</td></tr>`;});
     h+='</table></div>';}
   h+=`<p style="margin-top:10px"><button id="clearsel">Clear selection</button></p>`;
   el.innerHTML=h;el.querySelectorAll('tr.row').forEach(r=>r.onclick=()=>selectCorner(+r.dataset.j));
@@ -2322,25 +2719,58 @@ function renderCmpSections(){
     <div class="scroll"><table><tr><th class="l">Section</th><th>Length</th><th>${swc(riderColor(a))} ${an}</th><th>${swc(riderColor(b))} ${bn}</th><th>Δ</th>${A.M.hasPower&&B.M.hasPower?`<th>${pwU()} A / B</th>`:''}<th>Best A</th><th>Best B</th><th>SD A</th><th>SD B</th></tr>`;
   let ta=0,tb=0;const pwc=A.M.hasPower&&B.M.hasPower;
   S.forEach((s,i)=>{const va=secVal(A,sa,i),vb=secVal(B,sb,i);ta+=va;tb+=vb;
-    h+=`<tr class="row${state.sel===i?' sel':''}" data-i="${i}"><td class="l"><b>S${s.id}</b> ${esc(s.name)}</td><td class="dim">${uLen(s.ft1-s.ft0)}</td><td>${fmt1(va)}</td><td>${fmt1(vb)}</td>
+    h+=`<tr class="row${selSet().includes(i)?' sel':''}" data-i="${i}"><td class="l"><b>S${s.id}</b> ${esc(s.name)}</td><td class="dim">${uLen(s.ft1-s.ft0)}</td><td>${fmt1(va)}</td><td>${fmt1(vb)}</td>
       <td style="background:${dcol(ds[i],dm)};font-weight:600">${isFinite(ds[i])?fmtD(ds[i]):'—'}</td>${pwc?`<td class="dim">${pwF(A,secPw(A,sa,i))} / ${pwF(B,secPw(B,sb,i))}</td>`:''}<td class="dim">${fmt1(best(A,sa,i))}</td><td class="dim">${fmt1(best(B,sb,i))}</td><td class="dim">${secSd(sa,i,A.M).toFixed(1)}</td><td class="dim">${secSd(sb,i,B.M).toFixed(1)}</td></tr>`;});
   h+=`<tr><td class="l"><b>Sum of sections</b></td><td></td><td><b>${fmtT(ta)}</b></td><td><b>${fmtT(tb)}</b></td><td style="font-weight:700">${isFinite(tb-ta)?fmtD(tb-ta):'—'}</td><td colspan="${pwc?5:4}"></td></tr></table></div>`;
   const el=$('cmpsec');el.innerHTML=h;el.querySelectorAll('tr.row').forEach(r=>r.onclick=()=>selectSection(+r.dataset.i));
 }
+// Riders drawn on the line charts. Compare: the two being compared, plus anyone ticked under "also show". Leaderboard: everyone not unticked.
+function chartIds(){const ok=okRiders();if(isLb()){const ids=ok.filter(i=>!(state.lbHide||[]).includes(i));return ids.length?ids:ok;}
+  const {a,b}=state.cmp;return [a,b,...(state.cmp.more||[]).filter(i=>ok.includes(i)&&i!==a&&i!==b)];}
+// the dashed zero line of the time-gap chart: Compare: the "Compare" rider; Leaderboard: the one picked, or else the fastest of those shown
+function chartZero(ids){if(!isLb())return state.cmp.a;const z=state.lbZero;if(z!=null&&ids.includes(z))return z;const o=LB.order.map(ri=>LB.ids[ri]).find(i=>ids.includes(i));return o!=null?o:ids[0];}
+// the rider menu, repeated above the time-gap and speed charts so riders can be switched while looking at them
+function renderChartBar(){const ok=okRiders(),lb=isLb(),ids=chartIds();
+  const ropts=sel=>ok.map(i=>`<option value="${i}" ${i===sel?'selected':''}>${esc(dn(RIDERS[i]))}</option>`).join('');
+  const mx=Math.min(...(lb?okRiders():[state.cmp.a,state.cmp.b]).map(i=>RIDERS[i].M.nl));
+  const bopts=[['typ','typical lap'],['best','fastest lap'],...Array.from({length:mx},(_,k)=>[k+1,'lap '+(k+1)])].map(([v,t])=>`<option value="${v}" ${String(state.cmp.basis)===String(v)?'selected':''}>${t}</option>`).join('');
+  const chk=(i,attr,on,dis)=>`<label class="lbl"><input type="checkbox" ${attr}="${i}" ${on?'checked':''} ${dis?'disabled':''}> ${swc(riderColor(i))} ${esc(dn(RIDERS[i]))}</label>`;
+  let h;
+  if(lb){const z=state.lbZero!=null&&ids.includes(state.lbZero)?state.lbZero:'';
+    h=`<span class="lbl">Show:</span> ${ok.map(i=>chk(i,'data-cbshow',ids.includes(i),ids.length<=1&&ids.includes(i))).join(' ')}
+      <label class="lbl">zero line <select data-cb="zero"><option value="" ${z===''?'selected':''}>fastest shown</option>${ids.map(i=>`<option value="${i}" ${i===z?'selected':''}>${esc(dn(RIDERS[i]))}</option>`).join('')}</select></label>`;}
+  else{const {a,b}=state.cmp,more=ok.filter(i=>i!==a&&i!==b);
+    h=`<label class="lbl">${swc(riderColor(a))} Compare <select data-cb="a">${ropts(a)}</select></label><label class="lbl">${swc(riderColor(b))} with <select data-cb="b">${ropts(b)}</select></label>${more.length?` <span class="lbl">also show:</span> ${more.map(i=>chk(i,'data-cbmore',ids.includes(i))).join(' ')}`:''}`;}
+  h+=` <label class="lbl">using <select data-cb="basis">${bopts}</select></label><label class="lbl"><input type="checkbox" data-cb="laps" ${state.cmpLaps?'checked':''}> individual laps</label>`;
+  ['chartbar','chartbar2'].forEach(id=>{const el=$(id);el.innerHTML=h;
+    el.querySelectorAll('select[data-cb]').forEach(s=>s.onchange=()=>chartBarSet(s.dataset.cb,s.value));
+    el.querySelector('input[data-cb="laps"]').onchange=e=>{state.cmpLaps=e.target.checked;renderAll();};
+    el.querySelectorAll('input[data-cbmore]').forEach(c=>c.onchange=()=>{const i=+c.dataset.cbmore,m=(state.cmp.more||[]).filter(x=>x!==i);if(c.checked)m.push(i);state.cmp.more=m;renderAll();});
+    el.querySelectorAll('input[data-cbshow]').forEach(c=>c.onchange=()=>{const i=+c.dataset.cbshow,hd=(state.lbHide||[]).filter(x=>x!==i);if(!c.checked)hd.push(i);state.lbHide=hd;renderAll();});});}
+function chartBarSet(k,v){
+  if(k==='basis')state.cmp.basis=v==='typ'||v==='best'?v:+v;
+  else if(k==='zero')state.lbZero=v===''?null:+v;
+  else{const ok=okRiders();v=+v;state.cmp[k]=v;if(state.cmp.a===state.cmp.b){const o=ok.find(i=>i!==v);if(k==='a')state.cmp.b=o;else state.cmp.a=o;}
+    const mx=Math.min(RIDERS[state.cmp.a].M.nl,RIDERS[state.cmp.b].M.nl);if(typeof state.cmp.basis==='number'&&state.cmp.basis>mx)state.cmp.basis='typ';}
+  renderAll();}
 function renderCmpCharts(){
-  const {A,B,a,b}=CMP;const ta=riderTrace(A),tb=riderTrace(B),ca=riderColor(a),cb=riderColor(b);
-  const sh=state.cmpLaps;
-  $('cmpgapnote').innerHTML=`The dashed zero line is ${esc(dn(A))}'s ${basisLabel()}; the bold line is ${esc(dn(B))}'s${sh?`, and the faint lines are each of ${esc(dn(B))}'s individual laps against that same zero line`:''}. Up = ${esc(dn(B))} behind, down = ahead. Where the line climbs, ${esc(dn(A))} is gaining; where it falls, ${esc(dn(B))} is. Drag across any chart to zoom; double-click to reset.`;
-  // each rider's individual laps drawn faintly behind their bold comparison line (not in the hover readout)
-  const faint=(r,col,f)=>sh?incFor(r.M).map(k=>({show:true,nohover:true,color:col,w:1,op:.25,y:f(r.TR[k])})):[];
-  lineChart('gap',{h:280,zero:true,secLabels:true,sortAsc:true,baseLabel:dn(A),yfmt:v=>(v>0?'+':'')+v+'s',tfmt:v=>(v>0?'+':v<0?'−':'')+Math.abs(v).toFixed(1)+' s',
-    series:[...faint(B,cb,t=>t.t.map((x,j)=>x-ta.t[j])),{label:dn(B),show:true,color:cb,w:2.5,y:tb.t.map((x,j)=>x-ta.t[j])},{show:true,color:ca,w:1.5,dash:true,y:FT.map(()=>0)}]});
+  renderChartBar();
+  const ids=chartIds(),zi=chartZero(ids),Z=RIDERS[zi],others=ids.filter(i=>i!==zi),tr={};ids.forEach(i=>{tr[i]=riderTrace(RIDERS[i]);});const tz=tr[zi];
+  const sh=state.cmpLaps,zn=esc(dn(Z));
+  if(others.length===1){const bn=esc(dn(RIDERS[others[0]]));
+    $('cmpgapnote').innerHTML=`The dashed zero line is ${zn}'s ${basisLabel()}; the bold line is ${bn}'s${sh?`, and the faint lines are each of ${bn}'s individual laps against that same zero line`:''}. Up = ${bn} behind, down = ahead. Where the line climbs, ${zn} is gaining; where it falls, ${bn} is. Drag across any chart to zoom; double-click to reset.`;}
+  else $('cmpgapnote').innerHTML=`The dashed zero line is ${zn}'s ${basisLabel()}; each bold line is another ${entW(1)}'s${sh?', with their individual laps drawn faintly':''}. Up = behind ${zn}, down = ahead. Where a line climbs, ${zn} is gaining on that ${entW(1)}. Drag across any chart to zoom; double-click to reset.`;
+  // each rider's individual laps drawn faintly behind their bold line (not in the hover readout)
+  const op=ids.length>2?.18:.25,faint=(i,f)=>sh?incFor(RIDERS[i].M).map(k=>({show:true,nohover:true,color:riderColor(i),w:1,op,y:f(RIDERS[i].TR[k])})):[];
+  lineChart('gap',{h:280,zero:true,secLabels:true,sortAsc:true,baseLabel:dn(Z),yfmt:v=>(v>0?'+':'')+v+'s',tfmt:v=>(v>0?'+':v<0?'−':'')+Math.abs(v).toFixed(1)+' s',
+    series:[...others.flatMap(i=>faint(i,t=>t.t.map((x,j)=>x-tz.t[j]))),...others.map(i=>({label:dn(RIDERS[i]),show:true,color:riderColor(i),w:2.5,y:tr[i].t.map((x,j)=>x-tz.t[j])})),{show:true,color:riderColor(zi),w:1.5,dash:true,y:FT.map(()=>0)}]});
   lineChart('spd',{h:240,secLabels:true,floor0:true,yfmt:v=>v,tfmt:v=>v.toFixed(1)+' '+spdU(),
-    series:[...faint(A,ca,t=>t.v.map(cvS)),...faint(B,cb,t=>t.v.map(cvS)),{label:dn(A),show:true,color:ca,w:2.5,y:ta.v.map(cvS)},{label:dn(B),show:true,color:cb,w:2.5,y:tb.v.map(cvS)}]});
+    series:[...ids.flatMap(i=>faint(i,t=>t.v.map(cvS))),...ids.map(i=>({label:dn(RIDERS[i]),show:true,color:riderColor(i),w:2.5,y:tr[i].v.map(cvS)}))]});
   const wk=wkOn();$('pwrtitle').textContent=wk?'Power (W/kg of total system weight, 3-s smoothed)':'Power (W, 3-s smoothed)';
-  const pf=(r,p)=>wk?p.map(v=>v/kgOf(r)):p;
-  if(A.M.hasPower&&B.M.hasPower)lineChart('pwr',{h:220,floor0:true,yfmt:v=>wk?v.toFixed(1):v,tfmt:v=>wk?v.toFixed(2)+' W/kg':Math.round(v)+' W',
-    series:[...faint(A,ca,t=>pf(A,t.p)),...faint(B,cb,t=>pf(B,t.p)),{label:dn(A),show:true,color:ca,w:2.5,y:pf(A,ta.p)},{label:dn(B),show:true,color:cb,w:2.5,y:pf(B,tb.p)}]});
+  // with W/kg on, a rider without a system weight is left off the power chart
+  const pws=ids.filter(i=>RIDERS[i].M.hasPower&&(!wk||kgOf(RIDERS[i])>0)),pf=(i,p)=>wk?p.map(v=>v/kgOf(RIDERS[i])):p;
+  if(pws.length)lineChart('pwr',{h:220,floor0:true,yfmt:v=>wk?v.toFixed(1):v,tfmt:v=>wk?v.toFixed(2)+' W/kg':Math.round(v)+' W',
+    series:[...pws.flatMap(i=>faint(i,t=>pf(i,t.p))),...pws.map(i=>({label:dn(RIDERS[i]),show:true,color:riderColor(i),w:2.5,y:pf(i,tr[i].p)}))]});
   else delete charts.pwr;
   heartChart();
   lineChart('elev',{h:110,yt:3,area:true,yfmt:v=>Math.round(v),tfmt:v=>Math.round(v)+' '+elevU()+' elevation',series:[{show:true,color:css('--ink2'),w:1.5,y:TR.alt.map(cvE)}]});
@@ -2350,20 +2780,66 @@ function renderCmpCorners(){
   let h=`<h2>Corners: ${an} vs ${bn}</h2><p class="note" style="margin-top:-4px">${basisLabel()} for each rider. Time through the corner covers ~${approxL(65)} either side of the apex. Δ = ${bn} minus ${an} (blue = ${an} quicker).</p>
     <div class="scroll"><table><tr><th class="l">Corner</th><th class="l">Section</th><th>Apex ${spdU()} A</th><th>Apex ${spdU()} B</th><th>Δ ${spdU()}</th><th>Time A</th><th>Time B</th><th>Δ time</th><th>Exit ${pwU()} A / B</th></tr>`;
   CR.forEach((c,j)=>{const va=cornerVal(A,j,'vmin'),vb=cornerVal(B,j,'vmin'),ta=cornerVal(A,j,'t'),tb=cornerVal(B,j,'t');
-    h+=`<tr class="row${state.corner===j?' sel':''}" data-j="${j}"><td class="l"><b>${cTitle(c)}</b> <span class="dim">${c.dir==='L'?'left':'right'} ${c.kind}</span></td><td class="l dim">S${c.sec}</td>
+    h+=`<tr class="row${state.corner===j?' sel':''}" data-j="${j}"><td class="l"><b>${cTitle(c)}</b> ${cKindTag(c)}</td><td class="l dim">S${c.sec}</td>
       <td>${fmt1(cvS(va))}</td><td>${fmt1(cvS(vb))}</td><td style="background:${dcol(va-vb,2)}">${isFinite(vb-va)?(vb-va>0?'+':'')+cvS(vb-va).toFixed(1):'—'}</td>
       <td>${fmt1(ta)}</td><td>${fmt1(tb)}</td><td style="background:${dcol(tb-ta,1.5)};font-weight:600">${isFinite(tb-ta)?fmtD(tb-ta):'—'}</td>
       <td class="dim">${A.M.hasPower?pwF(A,cornerVal(A,j,'pexit')):'—'} / ${B.M.hasPower?pwF(B,cornerVal(B,j,'pexit')):'—'}</td></tr>`;});
-  h+='</table></div>';
-  const el=$('cmpcorners');el.innerHTML=h;el.querySelectorAll('tr.row').forEach(r=>r.onclick=()=>{selectCorner(+r.dataset.j);$('mapcard').scrollIntoView({behavior:'smooth',block:'center'});});
+  h+='</table></div>'+cornerStackHtml(chartIds());
+  const el=$('cmpcorners');el.innerHTML=h;drawCornerStack(el,chartIds());el.querySelectorAll('tr.row').forEach(r=>r.onclick=()=>{selectCorner(+r.dataset.j);$('mapcard').scrollIntoView({behavior:'smooth',block:'center'});});
 }
+// Corner by corner, stacked: one bar per corner, one block per rider. "Time left" = the single-rider corner report's measure (each rider's laps
+// against their own best pass through that corner, summed); "behind" = each rider's time through the corner minus the quickest of them.
+function cornerStackVals(ids){const m=state.stackMetric==='behind'?'behind':'left';
+  return CR.map((c,j)=>{if(m==='behind'){const t=ids.map(i=>cornerVal(RIDERS[i],j,'t')),f=t.filter(isFinite),b=f.length?Math.min(...f):NaN;return t.map(v=>isFinite(v)&&isFinite(b)?v-b:0);}
+    return ids.map(i=>{const r=RIDERS[i],cc=r.M.corners[j];if(!cc)return 0;const L=incFor(r.M).filter(k=>cc.laps[k]);if(L.length<2)return 0;const t=L.map(k=>cc.laps[k].t),b=Math.min(...t);return t.reduce((a,x)=>a+x-b,0);});});}
+function cornerStackHtml(ids){const m=['behind','avg'].includes(state.stackMetric)?state.stackMetric:'left';
+  return `<h3 style="margin-top:16px">${m==='avg'?'Corner by corner: average time, side by side':'Corner by corner, stacked'}</h3><div class="row-flex noprint" style="margin:-4px 0 6px"><label class="lbl">Show <select class="stackm">
+    <option value="left" ${m==='left'?'selected':''}>stacked: time left (a ${entW(1)}'s laps against their own best pass, as in the corner report)</option>
+    <option value="behind" ${m==='behind'?'selected':''}>stacked: time behind the quickest of them through the corner (${basisLabel()})</option>
+    <option value="avg" ${m==='avg'?'selected':''}>side by side: average time through the corner, with the lap-to-lap spread</option></select></label></div>
+    <svg class="stackbars"></svg><div class="legendbar stackleg"></div><p class="hint stackhint">${m==='avg'?`One group per corner, one bar per ${entW(1)}: the average of their laps through the corner (about ${approxL(65)} either side of the apex). The thin line on each bar runs from one standard deviation below the average to one above, so a long line means that ${entW(1)} varied a lot from lap to lap.`:`One bar per corner, one colored block per ${entW(1)}. Tall bars are where there is the most time to find.`} ${ids.length} shown${state.view==='cmp'?' (the ones on the charts above)':''}. Click a bar to pick that corner.</p>`;}
+function cornerAvgVals(ids){return CR.map((c,j)=>ids.map(i=>{const r=RIDERS[i],cc=r.M.corners[j];if(!cc)return null;const t=incFor(r.M).filter(k=>cc.laps[k]).map(k=>cc.laps[k].t);return t.length?{m:mean(t),sd:sd(t),n:t.length}:null;}));}
+function drawCornerAvg(el,ids){const svg=el.querySelector('.stackbars'),st=cornerAvgVals(ids),all=st.flat().filter(Boolean);if(!all.length){svg.innerHTML='';return;}
+  const W=svg.clientWidth||900,H=240,m={l:40,r:10,t:10,b:30},n=CR.length,bw=(W-m.l-m.r)/Math.max(1,n);
+  // the axis starts a little below the lowest value so the differences between riders can be seen (the hint says where it starts)
+  const lo=Math.max(0,Math.floor(Math.min(...all.map(v=>v.m-v.sd))-0.5)),hi=Math.max(...all.map(v=>v.m+v.sd))+0.3,sy=v=>H-m.b-(v-lo)/(hi-lo)*(H-m.t-m.b);
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.setAttribute('height',H);
+  let h='';niceTicks(lo,hi,4).forEach(v=>{h+=`<line x1="${m.l}" x2="${W-m.r}" y1="${sy(v)}" y2="${sy(v)}" stroke="var(--grid)"/><text x="${m.l-6}" y="${sy(v)+3.5}" text-anchor="end">${v}s</text>`;});
+  const gw=bw*0.8,w1=gw/ids.length;
+  CR.forEach((c,j)=>{const x=m.l+j*bw;
+    ids.forEach((id,ri)=>{const v=st[j][ri];if(!v)return;const x0=x+bw*0.1+ri*w1,cx=x0+w1/2,y=sy(v.m);
+      h+=`<rect x="${(x0+0.4).toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(0.5,w1-0.8).toFixed(1)}" height="${Math.max(0.5,H-m.b-y).toFixed(1)}" fill="${riderColor(id)}" opacity="${state.corner===j?1:.85}"/>`;
+      if(v.n>1){const y0=sy(v.m-v.sd),y1=sy(v.m+v.sd),cw=Math.min(6,w1*0.35);h+=`<line x1="${cx}" x2="${cx}" y1="${y0}" y2="${y1}" stroke="var(--ink)" stroke-width="1.3"/><line x1="${cx-cw}" x2="${cx+cw}" y1="${y0}" y2="${y0}" stroke="var(--ink)" stroke-width="1.3"/><line x1="${cx-cw}" x2="${cx+cw}" y1="${y1}" y2="${y1}" stroke="var(--ink)" stroke-width="1.3"/>`;}});
+    if(n<=40||j%2===0)h+=`<text x="${x+bw/2}" y="${H-m.b+13}" text-anchor="middle" style="font-size:10px">C${c.id}</text>`;
+    h+=`<rect class="cb" data-j="${j}" x="${x}" y="${m.t}" width="${bw}" height="${H-m.t}" fill="transparent" style="cursor:pointer"/>`;});
+  h+=`<line x1="${m.l}" x2="${W-m.r}" y1="${H-m.b}" y2="${H-m.b}" stroke="var(--axis)"/>`;svg.innerHTML=h;
+  el.querySelector('.stackleg').innerHTML=ids.map(id=>`<span>${swc(riderColor(id))} ${esc(dn(RIDERS[id]))}</span>`).join('')+(lo>0?`<span class="muted">axis starts at ${lo} s</span>`:'');
+  svg.querySelectorAll('.cb').forEach(r=>{const j=+r.dataset.j;
+    r.onmousemove=ev=>showTip(`<b>${cTitle(CR[j])}</b><br>`+ids.map((id,ri)=>{const v=st[j][ri];return `${swc(riderColor(id))} ${esc(dn(RIDERS[id]))}: ${v?`<b>${v.m.toFixed(2)} s</b> ± ${v.sd.toFixed(2)} <span class="muted">(${v.n} lap${v.n===1?'':'s'})</span>`:'—'}`;}).join('<br>'),ev);
+    r.onmouseleave=hideTip;r.onclick=()=>{selectCorner(j);if(!docked())$('mapcard').scrollIntoView({behavior:'smooth',block:'center'});};});
+  el.querySelector('.stackm').onchange=e=>{state.stackMetric=e.target.value;renderAll();};}
+function drawCornerStack(el,ids){const svg=el.querySelector('.stackbars');if(!svg)return;if(state.stackMetric==='avg'){drawCornerAvg(el,ids);return;}const vals=cornerStackVals(ids),tot=vals.map(v=>v.reduce((a,x)=>a+x,0));
+  const W=svg.clientWidth||900,H=220,m={l:40,r:10,t:10,b:30},n=CR.length,bw=(W-m.l-m.r)/Math.max(1,n),mx=Math.max(0.5,...tot),sy=v=>(H-m.t-m.b)*v/mx;
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);svg.setAttribute('height',H);
+  let h='';niceTicks(0,mx,4).forEach(v=>{const y=H-m.b-sy(v);h+=`<line x1="${m.l}" x2="${W-m.r}" y1="${y}" y2="${y}" stroke="var(--grid)"/><text x="${m.l-6}" y="${y+3.5}" text-anchor="end">${v}s</text>`;});
+  CR.forEach((c,j)=>{const x=m.l+j*bw;let y=H-m.b;
+    ids.forEach((id,ri)=>{const v=vals[j][ri];if(!(v>0))return;const hh=sy(v);y-=hh;h+=`<rect x="${(x+bw*0.15).toFixed(1)}" y="${y.toFixed(1)}" width="${(bw*0.7).toFixed(1)}" height="${Math.max(0.5,hh-0.6).toFixed(1)}" fill="${riderColor(id)}" opacity="${state.corner===j?1:.88}"/>`;});
+    if(n<=40||j%2===0)h+=`<text x="${x+bw/2}" y="${H-m.b+13}" text-anchor="middle" style="font-size:10px">C${c.id}</text>`;
+    h+=`<rect class="cb" data-j="${j}" x="${x}" y="${m.t}" width="${bw}" height="${H-m.t}" fill="transparent" style="cursor:pointer"/>`;});
+  h+=`<line x1="${m.l}" x2="${W-m.r}" y1="${H-m.b}" y2="${H-m.b}" stroke="var(--axis)"/>`;svg.innerHTML=h;
+  const sums=ids.map((id,ri)=>vals.reduce((a,v)=>a+v[ri],0));
+  el.querySelector('.stackleg').innerHTML=ids.map((id,ri)=>`<span>${swc(riderColor(id))} ${esc(dn(RIDERS[id]))}: ${sums[ri].toFixed(1)} s in all</span>`).join('');
+  svg.querySelectorAll('.cb').forEach(r=>{const j=+r.dataset.j;
+    r.onmousemove=ev=>showTip(`<b>${cTitle(CR[j])}</b><br>`+ids.map((id,ri)=>`${swc(riderColor(id))} ${esc(dn(RIDERS[id]))}: <b>${vals[j][ri].toFixed(1)} s</b>`).join('<br>')+`<br><span class="muted">together ${tot[j].toFixed(1)} s</span>`,ev);
+    r.onmouseleave=hideTip;r.onclick=()=>{selectCorner(j);if(!docked())$('mapcard').scrollIntoView({behavior:'smooth',block:'center'});};});
+  el.querySelector('.stackm').onchange=e=>{state.stackMetric=e.target.value;renderAll();};}
 function renderCmpLaps(){
   const ok=okRiders(),mx=Math.max(...ok.map(i=>RIDERS[i].M.nl));
   let h=`<h2>Lap times, all ${entW(2)}</h2><div class="scroll"><table><tr><th class="l">Rider</th>${Array.from({length:mx},(_,k)=>`<th>L${k+1}</th>`).join('')}<th>Race</th></tr>`;
   ok.forEach(i=>{const r=RIDERS[i];h+=`<tr><td class="l">${swc(riderColor(i))} ${esc(dn(r))}</td>`;
     for(let k=0;k<mx;k++){const l=r.M.lapSum[k];h+=`<td${k===r.bestLap?' style="font-weight:700"':''}>${l?lapCell(l)+(l.toFinish?'†':''):''}</td>`;}
     h+=`<td>${fmtT(raceStats(r).time)}</td></tr>`;});
-  h+='</table></div><p class="hint">Bold = each rider\'s fastest lap. ≈ = start lap: for a different first-lap route, an estimated regular-course time (hover for the actual time); otherwise a standing or partial start. † = last lap timed to the finish rather than the lap line.</p>';
+  h+='</table></div><p class="hint">Bold = each rider\'s fastest lap. ≈ = start lap: for a different first-lap route, an estimated regular-course time (hover for the actual time); otherwise a standing or partial start; on a last lap that ends before the lap line, an estimated full lap. † = last lap timed to the finish rather than the lap line.</p>';
   $('cmplaps').innerHTML=h;
 }
 /* =================== entries: riders, or races (the same course on different days) =================== */
@@ -2440,7 +2916,7 @@ function renderLbSections(){
   let h=`<h2>Section leaderboard</h2><p class="note" style="margin-top:-4px">Each ${entW(1)}'s ${basisLabel()} through every section. The <b>outlined bold</b> cell is the fastest; the others are shaded red by how far they are behind it. Click a row to see it on the map and lap by lap.</p>
     <div class="scroll"><table class="lbt"><tr><th class="l">Section</th><th>Length</th>${ids.map(i=>`<th class="rh">${lbName(i)}</th>`).join('')}<th class="l">Fastest</th><th>Spread</th></tr>`;
   S.forEach((s,i)=>{const b=LB.best[i],vs=LB.val.map(a=>a[i]).filter(isFinite);
-    h+=`<tr class="row${state.sel===i?' sel':''}" data-i="${i}"><td class="l"><b>S${s.id}</b> ${esc(s.name)}</td><td class="dim">${uLen(s.ft1-s.ft0)}</td>`;
+    h+=`<tr class="row${selSet().includes(i)?' sel':''}" data-i="${i}"><td class="l"><b>S${s.id}</b> ${esc(s.name)}</td><td class="dim">${uLen(s.ft1-s.ft0)}</td>`;
     ids.forEach((id,ri)=>{const v=LB.val[ri][i];if(!isFinite(v)){h+=`<td class="muted" title="No time here: this ${entW(1)} did not ride this part of the reference course">—</td>`;return;}
       const win=LB.wins[i].includes(ri),g=v-b;
       h+=`<td class="${win?'lbbest':''}" style="background:${win?diverge(-.55,true):shade01(g/Math.max(1.2,.07*b))}" title="${esc(dn(RIDERS[id]))}: ${v.toFixed(2)} s${win?' (fastest)':' (+'+g.toFixed(2)+' s)'}">${v.toFixed(1)}</td>`;});
@@ -2457,13 +2933,13 @@ function renderLbCorners(){
     <div class="scroll"><table class="lbt"><tr><th class="l" rowspan="2">Corner</th><th class="l" rowspan="2">Section</th>${ids.map(i=>`<th class="rh g" colspan="2">${lbName(i)}</th>`).join('')}<th class="l" rowspan="2">Fastest through</th><th class="l" rowspan="2">Highest apex</th></tr><tr>${ids.map(()=>'<th class="g">apex</th><th>time</th>').join('')}</tr>`;
   CR.forEach((c,j)=>{const av=ap[j].filter(isFinite),tv=tm[j].filter(isFinite),ba=av.length?Math.max(...av):NaN,bt=tv.length?Math.min(...tv):NaN;
     const wt=tm[j].map((v,ri)=>isFinite(v)&&v<=bt+1e-9?ri:-1).filter(x=>x>=0),wa=ap[j].map((v,ri)=>isFinite(v)&&v>=ba-1e-9?ri:-1).filter(x=>x>=0);
-    h+=`<tr class="row${state.corner===j?' sel':''}" data-j="${j}"><td class="l"><b>${cTitle(c)}</b> <span class="dim">${cdir(c)} ${c.kind}</span></td><td class="l dim">S${c.sec}</td>`;
+    h+=`<tr class="row${state.corner===j?' sel':''}" data-j="${j}"><td class="l"><b>${cTitle(c)}</b> ${cKindTag(c)}</td><td class="l dim">S${c.sec}</td>`;
     ids.forEach((id,ri)=>{const a=ap[j][ri],t=tm[j][ri];
       h+=isFinite(a)?`<td class="g${wa.includes(ri)?' lbbest':''}" style="background:${wa.includes(ri)?diverge(-.55,true):shade01((ba-a)/2.5)}">${fmt1(cvS(a))}</td>`:'<td class="g muted">—</td>';
       h+=isFinite(t)?`<td class="${wt.includes(ri)?'lbbest':''}" style="background:${wt.includes(ri)?diverge(-.55,true):shade01((t-bt)/.8)}">${t.toFixed(1)}</td>`:'<td class="muted">—</td>';});
     h+=`<td class="l">${wt.length?wt.map(ri=>lbName(ids[ri])).join(' / '):'—'}</td><td class="l">${wa.length?wa.map(ri=>lbName(ids[ri])).join(' / '):'—'}</td></tr>`;});
-  h+='</table></div>';
-  const el=$('lbcorners');el.innerHTML=h;el.querySelectorAll('tr.row').forEach(r=>r.onclick=()=>{selectCorner(+r.dataset.j);$('mapcard').scrollIntoView({behavior:'smooth',block:'center'});});
+  h+='</table></div>'+cornerStackHtml(chartIds());
+  const el=$('lbcorners');el.innerHTML=h;drawCornerStack(el,chartIds());el.querySelectorAll('tr.row').forEach(r=>r.onclick=()=>{selectCorner(+r.dataset.j);$('mapcard').scrollIntoView({behavior:'smooth',block:'center'});});
 }
 function lbSecTip(i){const rows=LB.ids.map((id,ri)=>({id,v:LB.val[ri][i]})).filter(x=>isFinite(x.v)).sort((a,b)=>a.v-b.v),b=LB.best[i];
   return `<b>${esc(secName(i))}</b> (${basisLabel()})<br>`+rows.map(x=>`${lbName(x.id)}: <b>${x.v.toFixed(1)} s</b>${x.v-b>0.005?` <span class="muted">+${(x.v-b).toFixed(1)}</span>`:''}`).join('<br>')+(rows.length?'':'no times');}
@@ -2476,7 +2952,7 @@ function renderLbDetail(){
     let h=`<h2>Lap times, every ${entW(1)}</h2><div class="scroll"><table class="lbt"><tr>${head}</tr>`;
     for(let k=0;k<mx;k++){const v=ids.map(i=>{const l=RIDERS[i].M.lapSum[k];return l&&l.adj!=null?l.adj:l&&!l.shortcut&&!l.partial&&!l.partialEnd&&isFinite(l.time)?l.time:NaN;}),b=Math.min(...v.filter(isFinite));
       h+=`<tr><td class="l">L${k+1}</td>${ids.map((i,ri)=>{const l=RIDERS[i].M.lapSum[k];return `<td class="${v[ri]===b?'lbbest':''}">${l?lapCell(l):''}</td>`;}).join('')}</tr>`;}
-    h+=`</table></div><p class="hint">Outlined = fastest full lap of that number. ≈ = start lap: an estimated regular-course time when lap 1 took a different route (hover for the actual time), otherwise a standing-start or partial lap.</p><h3>Pick a section</h3><p class="note">Click a section on the map or a row in the leaderboard to see every ${entW(1)}'s time through it, lap by lap.</p>`;
+    h+=`</table></div><p class="hint">Outlined = fastest full lap of that number. ≈ = start lap: an estimated regular-course time when lap 1 took a different route (hover for the actual time), otherwise a standing-start or partial lap; on a last lap that ends before the lap line, an estimated full lap.</p><h3>Pick a section</h3><p class="note">Click a section on the map or a row in the leaderboard to see every ${entW(1)}'s time through it, lap by lap.</p>`;
     el.innerHTML=h;return;}
   const i=state.sel,s=S[i],b=LB.best[i];
   let h=`<h2>${esc(secName(i))}</h2><p class="note" style="margin-top:-6px">${uLen(s.ft1-s.ft0)} · fastest on ${basisLabel()}: ${LB.wins[i].length?LB.wins[i].map(ri=>esc(dn(RIDERS[ids[ri]]))).join(' / ')+' '+fmt1(b)+' s':'none'}</p>
@@ -2487,14 +2963,15 @@ function renderLbDetail(){
   h+=`<tr><td class="l dim">SD (lap to lap)</td>${ids.map(id=>`<td class="dim">${(()=>{const q=secSd(LB.secs[id],i,RIDERS[id].M);return isFinite(q)?q.toFixed(1):'—';})()}</td>`).join('')}</tr></table></div>`;
   const cs=CR.map((c,j)=>({c,j})).filter(o=>o.c.sec===s.id);
   if(cs.length){h+=`<h3>Corners in this section: apex ${spdU()} / time (${basisLabel()})</h3><div class="scroll"><table class="lbt"><tr><th class="l">Corner</th>${ids.map(id=>`<th class="rh">${lbName(id)}</th>`).join('')}</tr>`;
-    cs.forEach(({c,j})=>{h+=`<tr class="row" data-j="${j}"><td class="l">${cTitle(c)} <span class="dim">${c.dir} ${c.kind}</span></td>${ids.map(id=>{const a=cornerVal(RIDERS[id],j,'vmin'),t=cornerVal(RIDERS[id],j,'t');return `<td>${isFinite(a)?fmt1(cvS(a)):'—'} / ${isFinite(t)?t.toFixed(1):'—'}</td>`;}).join('')}</tr>`;});h+='</table></div>';}
+    cs.forEach(({c,j})=>{h+=`<tr class="row" data-j="${j}"><td class="l">${cTitle(c)} ${cKindTag(c)}</td>${ids.map(id=>{const a=cornerVal(RIDERS[id],j,'vmin'),t=cornerVal(RIDERS[id],j,'t');return `<td>${isFinite(a)?fmt1(cvS(a)):'—'} / ${isFinite(t)?t.toFixed(1):'—'}</td>`;}).join('')}</tr>`;});h+='</table></div>';}
   h+=`<p style="margin-top:10px"><button id="clearsel">Clear selection</button></p>`;
   el.innerHTML=h;el.querySelectorAll('tr.row').forEach(r=>r.onclick=()=>selectCorner(+r.dataset.j));
   $('clearsel').onclick=()=>{state.sel=null;state.corner=null;state.xr=null;renderAll();};
 }
 function renderLbCharts(){
-  const ids=LB.ids,leadI=ids[LB.order[0]],lead=RIDERS[leadI],trs=ids.map(i=>riderTrace(RIDERS[i])),tl=trs[LB.order[0]],sh=state.cmpLaps;
-  $('cmpgapnote').innerHTML=`The dashed zero line is ${esc(dn(lead))}'s ${basisLabel()}, the fastest on this basis. Every other line shows how far behind (up) or ahead (down) of it that ${entW(1)} was at each point. Where a line climbs, the leader is gaining. Drag across any chart to zoom; double-click to reset.`;
+  renderChartBar();
+  const ids=chartIds(),leadI=chartZero(ids),lead=RIDERS[leadI],trs=ids.map(i=>riderTrace(RIDERS[i])),tl=trs[ids.indexOf(leadI)],sh=state.cmpLaps;
+  $('cmpgapnote').innerHTML=`The dashed zero line is ${esc(dn(lead))}'s ${basisLabel()}${state.lbZero!=null&&state.lbZero===leadI?'':`, the fastest of the ${entW(2)} shown on this basis`}. Every other line shows how far behind (up) or ahead (down) of it that ${entW(1)} was at each point. Where a line climbs, the leader is gaining. Drag across any chart to zoom; double-click to reset.`;
   const faint=(i,f)=>sh?incFor(RIDERS[i].M).map(k=>({show:true,nohover:true,color:riderColor(i),w:1,op:.18,y:f(RIDERS[i].TR[k])})):[];
   const wk=wkOn();
   lineChart('gap',{h:280,zero:true,secLabels:true,sortAsc:true,baseLabel:dn(lead),yfmt:v=>(v>0?'+':'')+v+'s',tfmt:v=>(v>0?'+':v<0?'−':'')+Math.abs(v).toFixed(1)+' s',
@@ -2558,7 +3035,7 @@ function syncTg(){const L=M.laps[0],ls=M.lapSum[0],G=M.G,NG=M.NG,raw=L.tgRaw||L.
   const parts=ls.diff.slice().sort((x,y)=>x.a-y.a);const Ts=[],Ss=[];let shift=0,g=0;
   for(const p of parts){const ga=gAt(p.a),gb=gAt(p.b);
     for(;g<ga;g++){Ts.push(raw[g]+shift);Ss.push(G[g]);}
-    const Ta=p.kind==='start'?L.tstart:rawAt(p.a)+shift;
+    const Ta=p.kind==='start'||p.kind==='lead'?L.tstart:rawAt(p.a)+shift;
     if(p.kind!=='start'&&p.est>=p.act){Ts.push(Ta,NaN,Ta+p.act,Ta+p.est);Ss.push(G[ga],NaN,G[gb],G[gb]);}
     else{const f=prof(ga,gb);for(let q=ga;q<=gb;q++){Ts.push(Ta+f[q-ga]*p.est);Ss.push(G[q]);}}
     shift+=p.est-p.act;g=gb+1;}
@@ -2668,7 +3145,7 @@ function rpUI(){
 }
 function rpSnap(){const t=RP.t,st=rpState(t);return st.pos.map(o=>({id:o.e.id,label:o.e.label,vis:o.p.vis,done:!!o.p.done,lap:o.p.lap||null,s:o.p.s,x:o.p.x,y:o.p.y,gapS:o.p.gapS,gapFt:o.p.gapFt,lead:st.lead===o,dur:o.e.dur}));}
 
-let rt;addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{if(M){renderCharts();renderCornerReport();}},150);});
+let rt;addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{if(!M)return;if(layoutDock()){renderAll();return;}renderCharts();renderCornerReport();renderDock();},150);});
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>renderAll());
 
 /* ---- preloaded report ---- */
@@ -2683,7 +3160,7 @@ window.CXApp={get COURSE(){return COURSE;},replay:{seek:t=>{if(!RP.ents.length)r
   addBuffer:(buf,name)=>{addRiderRaw(rawFrom(parseFit(buf)),name);return run();},
   addRaw:(raw,name)=>{addRiderRaw(raw,name,name);return run();},
   // tests: start a fresh analysis from already-parsed series (same as handleBuffer, without the FIT step)
-  loadRaw:(raw,name)=>{RIDERS=[];PRIMARY=0;COURSE.lapLine=null;COURSE.lapHeading=null;COURSE.lapSplit='auto';state.view=0;addRiderRaw(raw,name,name);return run();},get RIDERS(){return RIDERS;},get PRIMARY(){return PRIMARY;},state,get M(){return M;},get S(){return S;},get AUTO(){return AUTO;},addCut,renderAll,selectSection,selectCorner,cornerAnalysis,csvCell,get CN(){return CN;},get COURSE(){return COURSE;}};
+  loadRaw:(raw,name)=>{RIDERS=[];PRIMARY=0;COURSE.lapLine=null;COURSE.lapHeading=null;COURSE.lapSplit='auto';state.view=0;FRESH=true;addRiderRaw(raw,name,name);return run();},get RIDERS(){return RIDERS;},get PRIMARY(){return PRIMARY;},state,get M(){return M;},get S(){return S;},get AUTO(){return AUTO;},addCut,renderAll,selectSection,selectCorner,cornerAnalysis,csvCell,get CN(){return CN;},get COURSE(){return COURSE;}};
 })();
 </script>
 </body>
